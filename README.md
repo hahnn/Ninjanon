@@ -7,6 +7,7 @@ One of the goals of NinjAnon is to be able to be used by any DBA dealing with pu
 NinjAnon is fully coded using PlPgsql and SQL.
 It also needs the anon (from Dalibo), pgcrypto and pg_cron PostgreSQL addons or extensions.
 And of course, you will need to deploy those FDWs: oracle_fdw, mysql_fdw, tds_fdw (for MSSQL), mongo_fdw and postgres_fdw.
+For Oracle FDW, you will have to install the Oracle Instant Client on your Linux server before to deploy the oracle_fdw extension. You can download it for free on Oracle's web site.
 
 # Optionnal dependencies
 NinjAnon is a sub-project of the main PGNinja project.
