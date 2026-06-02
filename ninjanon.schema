@@ -2085,7 +2085,11 @@ BEGIN
         -- or try another generation in the next loop occurence
         --
         IF NOT FOUND THEN
-                INSERT INTO custanon.last_name(val) VALUES (nom_courant);
+          IF langue_courante='fr' THEN
+                INSERT INTO custanon.last_name(val, langue, common) VALUES (nom_courant, langue_courante, true);
+          ELSE
+                INSERT INTO custanon.last_name(val, langue) VALUES (nom_courant, langue_courante);
+          END IF;
                 lang_counts[idx] := lang_counts[idx] - 1;
                 n := n + 1;
         END IF;
@@ -2201,10 +2205,14 @@ BEGIN
     -- initialize anon extension
     PERFORM anon.init();
 
-    -- change names dictionnary
-    TRUNCATE anon.last_name;
-    CALL custanon.generate_noms_uniques(250000);
-    INSERT INTO anon.last_name(oid, val) SELECT oid, val FROM custanon.last_name;
+    -- genrate and change anon schema last names dictionnary
+    -- if custanon.last_name is empty
+    PERFORM * FROM custanon.last_name LIMIT 1;
+    IF NOT FOUND THEN
+      TRUNCATE anon.last_name;
+      CALL custanon.generate_noms_uniques(250000);
+      INSERT INTO anon.last_name(oid, val) SELECT oid, val FROM custanon.last_name;
+    END IF;
   END IF;
 
   PERFORM custanon.setconfig('initialized', 'true');
