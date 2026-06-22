@@ -1,0 +1,89 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict QYMGYcUOCrVv40uwFmpDipZa2exY2BzoAcd7LIwu2robZjLKRdWaD8cE5FVkQd3
+
+-- Dumped from database version 17.6
+-- Dumped by pg_dump version 17.6
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: pg_cron; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION pg_cron; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION pg_cron IS 'Job scheduler for PostgreSQL';
+
+
+--
+-- Data for Name: job; Type: TABLE DATA; Schema: cron; Owner: postgres
+--
+
+COPY cron.job (jobid, schedule, command, nodename, nodeport, database, username, active, jobname) FROM stdin;
+29	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 16
+30	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 9
+31	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 10
+32	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 11
+33	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 12
+34	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 17
+35	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 18
+36	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 19
+37	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 20
+6	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 2
+7	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 3
+8	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 4
+1	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 1
+9	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 5
+10	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 6
+11	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 7
+12	* * * * *	CALL custanon.parallel_anon()	localhost	5432	ninjanon	postgres	t	Anonymizer 8
+13	0 12 * * *	DELETE FROM cron.job_run_details WHERE end_time<now() - interval '7 days'	localhost	5432	postgres	postgres	t	delete-job-run-details
+14	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 1
+15	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 2
+16	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 3
+17	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 4
+18	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 5
+19	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 6
+20	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 7
+21	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 8
+22	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 9
+23	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 10
+24	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 11
+25	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 12
+26	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 13
+27	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 14
+28	* * * * *	CALL custanon.parallel_inject()	localhost	5432	ninjanon	postgres	t	Injector 15
+\.
+
+
+--
+-- Name: jobid_seq; Type: SEQUENCE SET; Schema: cron; Owner: postgres
+--
+
+SELECT pg_catalog.setval('cron.jobid_seq', 37, true);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict QYMGYcUOCrVv40uwFmpDipZa2exY2BzoAcd7LIwu2robZjLKRdWaD8cE5FVkQd3
+
