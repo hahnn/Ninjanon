@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict XqBKqUbEqYZnS35YKN0nC8ErVL0at6m33cWbVrUC3NHorfdsEmsyr62HDDJ0sNa
+\restrict odsC6Rjc1O5fUSCtHtvrpbtaVNNlecmIbasCLyn5LBAnTOvGmF7ZYhjWp4krw3P
 
--- Dumped from database version 17.9
--- Dumped by pg_dump version 17.9
+-- Dumped from database version 17.10
+-- Dumped by pg_dump version 18.4
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -30,9 +30,9 @@ CREATE DATABASE ninjanon WITH TEMPLATE = template0 ENCODING = 'UTF8' LOCALE_PROV
 
 ALTER DATABASE ninjanon OWNER TO ninjanon;
 
-\unrestrict XqBKqUbEqYZnS35YKN0nC8ErVL0at6m33cWbVrUC3NHorfdsEmsyr62HDDJ0sNa
+\unrestrict odsC6Rjc1O5fUSCtHtvrpbtaVNNlecmIbasCLyn5LBAnTOvGmF7ZYhjWp4krw3P
 \connect ninjanon
-\restrict XqBKqUbEqYZnS35YKN0nC8ErVL0at6m33cWbVrUC3NHorfdsEmsyr62HDDJ0sNa
+\restrict odsC6Rjc1O5fUSCtHtvrpbtaVNNlecmIbasCLyn5LBAnTOvGmF7ZYhjWp4krw3P
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -145,7 +145,7 @@ BEGIN
   -- aonymization jobs. Basically, a human shouldn't call it as it is called
   -- periodically and automatically via the SQL cron scheduler (pg_cron).
   -- This function will call the clean function if autoclean is configured to true.
-  -- 
+  --
   PERFORM FROM custanon.parallel WHERE autoclean=true;
   IF FOUND THEN
     PERFORM custanon.clean();
@@ -436,6 +436,66 @@ $_$;
 ALTER FUNCTION custanon.autodiscovery(v_analyzecnt bigint, v_sourcedbid bigint, v_srcdbtech text, v_projectname text, csvfile text) OWNER TO ninjanon;
 
 --
+-- Name: check_iban_validity(text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.check_iban_validity(v_iban text) RETURNS boolean
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+    iban_nettoye TEXT;
+    valeur_numerique TEXT := '';
+    reste_numerique NUMERIC(38,0);
+    c CHAR;
+    code_ascii INT;
+    i INT;
+BEGIN
+  -- The custanon.check_iban_validity function can be used to ensure
+  -- an IBAN is correct according its control key.
+  -- Made using the help of ChatGPT.
+  --
+  -- 1. Nettoyage : Suppression des espaces, tirets et passage en majuscules
+  iban_nettoye := upper(regexp_replace(v_iban, '[^A-Za-z0-9]', '', 'g'));
+
+  -- 2. Validation de base de la structure minimale (Pays (2) + Clé (2) + BBAN (min 1))
+  IF length(iban_nettoye) < 5 THEN
+    RETURN FALSE;
+  END IF;
+
+  -- 3. Réorganisation selon la norme ISO 13616 :
+  -- Déplacer les 4 premiers caractères (Code Pays + Clé de contrôle) à la fin du BBAN
+  iban_nettoye := substr(iban_nettoye, 5) || substr(iban_nettoye, 1, 4);
+
+  -- 4. Conversion complète de la chaîne réorganisée en chiffres
+  FOR i IN 1..length(iban_nettoye) LOOP
+    c := substr(iban_nettoye, i, 1);
+    code_ascii := ascii(c);
+    IF code_ascii >= 65 AND code_ascii <= 90 THEN
+      valeur_numerique := valeur_numerique || (code_ascii - 55)::TEXT; -- A=10, B=11...
+    ELSE
+      valeur_numerique := valeur_numerique || c;
+    END IF;
+  END LOOP;
+
+  -- 5. Calcul du Modulo 97 par paquets (pour éviter les dépassements de capacité)
+  reste_numerique := 0;
+  FOR i IN 1..length(valeur_numerique) BY 6 LOOP
+    reste_numerique := (reste_numerique::TEXT || substr(valeur_numerique, i, 6))::NUMERIC(38,0) % 97;
+  END LOOP;
+
+  -- 6. Un IBAN est mathématiquement valide si le reste final vaut strictement 1
+  RETURN (reste_numerique = 1);
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN FALSE; -- Protection contre toute entrée corrompue
+END;
+$$;
+
+
+ALTER FUNCTION custanon.check_iban_validity(v_iban text) OWNER TO ninjanon;
+
+--
 -- Name: clean(); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
@@ -457,7 +517,7 @@ BEGIN
   --     purpose of the temporary PKs,
   --   * DROP the foreign server with all its atatched objects using CASCADE
   --   * DELETE the parallel jobs that were created to anonymize the database
-  -- 
+  --
   FOR r1 IN SELECT t0.dbid, t1.dbtech, t0.projectname, t0.maskrole, t0.maskschema FROM custanon.parallel t0, custanon.dbsources t1
     WHERE t0.dbid=t1.id AND (t0.state='done' OR t0.state='wait') GROUP BY t0.dbid, t1.dbtech, t0.projectname, t0.maskrole, t0.maskschema
     EXCEPT SELECT t0.dbid, t1.dbtech, t0.projectname, t0.maskrole, t0.maskschema FROM custanon.parallel t0, custanon.dbsources t1
@@ -591,7 +651,7 @@ BEGIN
   -- the existconfig function check if the configuration parameter
   -- named in the v_var input variable is existing in the config SQL table
   -- and returns true if it is, false otherwise.
-  -- 
+  --
   PERFORM FROM custanon.config WHERE var=v_var;
   IF FOUND THEN
     RETURN true;
@@ -638,7 +698,7 @@ BEGIN
   -- and regenerated, with the effect of completely changing the extracted jewel,
   -- thus changing the passphrase. At the end of the day, that means you'll be unable
   -- to decrypt passwords stored for the configured source databases.
-  -- 
+  --
   chestsize := (custanon.getconfig('chestsize', '8192')::integer);
   chestjumps := (custanon.getconfig('chestjumps', '88')::integer);
 
@@ -813,7 +873,7 @@ BEGIN
   -- without defined PK nor UNIQUE INDEX have UNIQUE data in it.
   -- if it's the case, that means Ninjanon will be able to create a temporary
   -- Primary Key using this specific column for the purpose of the anonymization
-  -- 
+  --
     FOR r1 IN SELECT column_name FROM information_schema.columns WHERE table_name = tbl AND table_schema = srcschema
     LOOP
         sql := format(
@@ -837,303 +897,124 @@ $_$;
 ALTER FUNCTION custanon.find_unique_columns(srcschema text, tbl text) OWNER TO ninjanon;
 
 --
--- Name: generate_anon_rules(bigint, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+-- Name: gar_generic_anonymizesample(bigint, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
-CREATE FUNCTION custanon.generate_anon_rules(v_dbid bigint, csvfile text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+CREATE FUNCTION custanon.gar_generic_anonymizesample(sourcedbid bigint, srcschema text, v_maskrole text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  maxsample bigint := (SELECT custanon.getconfig('maxsample', '50000')::bigint);
+  anonstart timestamp;
+  anonend timestamp;
+  anonduration interval;
+  sampleanonduration interval;
+  fullanonduration interval;
+  sample RECORD;
+BEGIN
+  -- The custanon.gar_generic_anonymizesample function really anonymize a small part
+  -- of the most complex table to compute approximative duration of full DB anonymization
+  -- (considering the duration computed is without any parallelism).
+  --
+  PERFORM custanon.logging(sourcedbid, 'Anonymize a ' || maxsample || ' tuples sample of the most time consuming table for generating statistics...');
+  EXECUTE 'GRANT pg_write_server_files TO ' || v_maskrole;
+  SELECT INTO sample srcschema || '.' || tbl AS tbl, nb, complexity FROM custanon.counts WHERE dbid=sourcedbid ORDER BY complexity DESC LIMIT 1;
+  PERFORM custanon.logging(sourcedbid, '  Sampling ' || sample.tbl || ' table...');
+  anonstart := clock_timestamp();
+  EXECUTE 'SET ROLE ' || v_maskrole;
+  EXECUTE 'COPY (SELECT * FROM ' || sample.tbl || ' LIMIT ' || maxsample || ') TO ''/var/tmp/test.csv'' WITH (FORMAT csv, HEADER, DELIMITER '';'')';
+  RESET ROLE;
+  anonend := clock_timestamp();
+  anonduration := anonend-anonstart;
+  PERFORM custanon.logging(sourcedbid, '  Sample anonymization made in ' || anonduration || '.');
+
+  PERFORM custanon.logging(sourcedbid, 'Computing projected anonymization time for all tables...');
+  sampleanonduration := anonduration*(sample.nb/maxsample);
+  UPDATE custanon.counts SET projected_anon_time=sampleanonduration*complexity/sample.complexity WHERE dbid=sourcedbid;
+
+  fullanonduration := (SELECT sum(projected_anon_time) FROM custanon.counts WHERE enabled=true AND dbid=sourcedbid);
+  PERFORM custanon.logging(sourcedbid, 'Expected (estimated) duration for full anonymization is around ' || fullanonduration);
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.gar_generic_anonymizesample(sourcedbid bigint, srcschema text, v_maskrole text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_applyrules(bigint, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_applyrules(sourcedbid bigint, srcschema text) RETURNS text
     LANGUAGE plpgsql
     SET search_path TO 'pg_catalog', 'pg_temp'
     AS $$
 DECLARE
   r1 RECORD;
 BEGIN
-  -- this version of the generate_anon_rules functions needs the database ID
-  -- as INPUT parameter. With that, connection parameters of the database will
-  -- be found and passed to the other generate_anon_rules function.
+  -- The custanon.gar_generic_applyrules function apply all anonymization rules defined
+  -- built previously, to the anon extension
   -- 
-  SELECT INTO r1 dbtech, sourceserver, sourceschema, sourcerole, datestyle FROM custanon.dbsources WHERE id=v_dbid;
-  IF NOT FOUND THEN
-    RETURN '';
-  END IF;
+  PERFORM custanon.logging(sourcedbid, 'Applying anonymization rules...');
+  PERFORM custanon.logging(sourcedbid, '  Remove existing anonymization rules...');
+  FOR r1 IN SELECT relnamespace, relname, attname FROM anon.pg_masking_rules WHERE relnamespace=srcschema::regnamespace
+  LOOP
+    EXECUTE format('SECURITY LABEL FOR anon ON COLUMN %I.%I.%I IS NULL', r1.relnamespace, r1.relname, r1.attname);
+  END LOOP;
+--  PERFORM anon.remove_masks_for_all_columns(); -- This one is to remove everything, which we don't want to not impact other existing source schemas
+  PERFORM custanon.logging(sourcedbid, '  Create new anonymization rules...');
+  FOR r1 IN SELECT t0.anon_rule FROM custanon.complexity t0 WHERE t0.anon_rule IS NOT NULL AND t0.dbid=sourcedbid
+  LOOP
+    EXECUTE r1.anon_rule;
+  END LOOP;
 
-  RETURN custanon.generate_anon_rules(r1.dbtech::text, csvfile, r1.sourceserver, r1.sourcerole, NULL, r1.sourceschema, r1.datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+  RETURN '';
 END;
 $$;
 
 
-ALTER FUNCTION custanon.generate_anon_rules(v_dbid bigint, csvfile text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+ALTER FUNCTION custanon.gar_generic_applyrules(sourcedbid bigint, srcschema text) OWNER TO ninjanon;
 
 --
--- Name: generate_anon_rules(text, text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+-- Name: gar_generic_closecsvrules(bigint, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
-CREATE FUNCTION custanon.generate_anon_rules(v_srcdbtech text, csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+CREATE FUNCTION custanon.gar_generic_closecsvrules(sourcedbid bigint, csvfile text, anonrulesfdw text) RETURNS text
     LANGUAGE plpgsql
     SET search_path TO 'pg_catalog', 'pg_temp'
-    AS $_$
+    AS $$
 DECLARE
-  i integer;
-  customid integer;
-  sourcedbid bigint;
-  sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
-  nbjobs integer := (SELECT custanon.getconfig('jobs', '4')::integer);
-  maxsample bigint := (SELECT custanon.getconfig('maxsample', '50000')::bigint);
-  noanon bigint;
-  withanon bigint;
-  analyzecnt bigint;
-  nblines integer;
-  nbtuples integer;
-  numentry integer;
-  anonstart timestamp;
-  anonend timestamp;
-  anonduration interval;
-  fullanonduration interval;
-  sampleanonduration interval;
-  bestmethod RECORD;
-  data_bestmethod RECORD;
-  r1 RECORD;
-  r2 RECORD;
-  sample RECORD;
-  srcsrvparams RECORD;
-  request TEXT;
-  salt TEXT;
-  sourcerolepwd TEXT;
-  sourcefdw TEXT;
-  anonrulesfdw TEXT;
-  srcschema TEXT;
-  dstschema TEXT;
-  schemaowner TEXT;
-  result TEXT;
-  pkcol TEXT;
-  proc TEXT;
-  newcol TEXT;
 BEGIN
-  -- The custanon.generate_anon_rules function is one the main Ninjanon functions.
-  -- It does several things to prepare the anonymization:
-  --   * record the source database to be anonymized and take its ID
-  --   * create the roles and anonymizaton schema needed, including GRANTS
-  --   * configure security labels on functions outside of the anon extension scope
-  --     that you might use for anonymization purposes (and don't forget to modify
-  --     this function to include others)
-  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
-  --     database to be anonymized. This can be: Oracle, PostgreSQL, MariaDB/MySQL,
-  --     MSSQL, MongoDB. Configure mapping users. Import the foreign schema.
-  --   * run the Autodiscovery to create the CSV file of the anonymization rules
-  --     automatically if Autodiscovery mode is enabled by the user
-  --   * Create the FDW on the CSV file containing the anonymization rules and
-  --     interprete all the rules and configure the real anon extension rules
-  --     accordingly
-  --   * compute the complexity indicators for all tables to be anonymized:
-  --     this will set the order in which the SQL tables will have to be anonymized
-  --   * anonymize a small sample of the most complicated SQL table to compute
-  --     the time needed on this basis for all SQL tables to be anonymized
-  --   * check what are the SQL tables without Primary Key in order to create
-  --     a temporary one on each found SQL table. Also check if a column with
-  --     unique values would be existing to make it a temporary PK.
-  --   * prepare the things depending on the output mode selected for the results
-  --     of the anonymization and depending of the database engine used for the
-  --     source database to be anonymized (that can be disable all indexes,
-  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
-  --   * configure the parallel jobs depending of the output mode, that will be
-  --     in charge of the anonymization in parallel
-  --
-  IF v_srcdbtech='oracle' THEN
-    PERFORM custanon.generate_anon_rules_oracle(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
-    RETURN '';
-  END IF;
-
-  srcschema := v_projectname || v_srcdbtech;
-  dstschema := v_projectname || v_dstdbtech;
-  schemaowner := v_projectname || 'adm';
-
-  PERFORM custanon.logging('Configuring source database...');
-  SELECT INTO srcsrvparams substring(f_srcserver, '^//(.*):') AS srcsrvname, substring(f_srcserver, '^//.*:([0-9]+)/') AS srcsrvport, substring(f_srcserver, '^//.*:[0-9]+/(.*)') AS srcsrvdb;
-  sourcedbid := (SELECT custanon.getdb(v_srcdbtech::custanon.dbengine, f_srcserver, f_srcschema, f_srcrole, f_srcpwdfile, f_datestyle));
-  sourcerolepwd := (SELECT custanon.pgp_sym_decrypt(sourcepwd, custanon.f_getjewel()) FROM custanon.dbsources WHERE id=sourcedbid);
-  sourcefdw := 'srcdb_' || sourcedbid;
-  anonrulesfdw := 'anonrules_' || sourcedbid;
-
-  -- update the counter of number of analysis
-  --
-  analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
-  INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
-
-  -- create needed roles, users and grants
+  -- The custanon.gar_generic_closecsvrules function simply drop the file
+  -- FDW on the CSV file describing the rules
   -- 
-  PERFORM custanon.logging(sourcedbid, 'Creating local source schema ' || srcschema || ' owned by ' || schemaowner || '...');
-  PERFORM * FROM pg_roles WHERE rolname=schemaowner;
-  IF NOT FOUND THEN
-    EXECUTE 'CREATE USER ' || schemaowner;
-    EXECUTE 'GRANT pg_read_server_files TO ' || schemaowner;
-  END IF;
-  EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || srcschema || ' AUTHORIZATION ' || schemaowner;
-  EXECUTE 'GRANT USAGE ON SCHEMA custanon TO ' || schemaowner;
+  PERFORM custanon.logging(sourcedbid, 'Closing CSV file ' || csvfile || '...');
+  EXECUTE 'DROP FOREIGN TABLE custanon.' || anonrulesfdw;
+  EXECUTE 'DROP SERVER ' || anonrulesfdw;
 
-  -- assign correct security labels on functions outside of the anon extension scope
-  -- that you might use in your anonymization strategies
-  --
-  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.concat_ws IS 'TRUSTED';
-  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.initcap IS 'TRUSTED';
+  RETURN '';
+END;
+$$;
 
-  EXECUTE 'GRANT ALL ON TABLE custanon.logs TO ' || schemaowner;
 
-  -- configure FDW on source DB
-  --
-  -- POSTGRESQL FDW
-  -- 
-  IF v_srcdbtech='pgsql' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating extension postgres_fdw...');
-    CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+ALTER FUNCTION custanon.gar_generic_closecsvrules(sourcedbid bigint, csvfile text, anonrulesfdw text) OWNER TO ninjanon;
 
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', dbname ''' || srcsrvparams.srcsrvdb || ''')';
+--
+-- Name: gar_generic_complexityindices(bigint, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
 
-    PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
-    EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "user" ''' || f_srcrole || ''')';
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "user" ''' || f_srcrole || ''')';
-    PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
-    IF NOT FOUND THEN
-      PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
-      EXECUTE 'SET ROLE ' || schemaowner;
-      EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
-      RESET ROLE;
-    END IF;
-
-  --
-  -- MARIADB/MYSQL FDW
-  -- 
-  ELSIF v_srcdbtech='mariadb' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating extension mysql_fdw...');
-    CREATE EXTENSION IF NOT EXISTS mysql_fdw;
-
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER mysql_fdw OPTIONS (host ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', fetch_size ''200'')';
-
-    PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
-    EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
-    PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
-    IF NOT FOUND THEN
-      PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
-      EXECUTE 'SET ROLE ' || schemaowner;
-      EXECUTE 'IMPORT FOREIGN SCHEMA ' || srcsrvparams.srcsrvdb || ' FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
-      RESET ROLE;
-    END IF;
-
-  --
-  -- MSSQL FDW
-  -- 
-  ELSIF v_srcdbtech='mssql' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating extension tds_fdw...');
-    CREATE EXTENSION IF NOT EXISTS tds_fdw;
-
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER tds_fdw OPTIONS (servername ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', database ''' || srcsrvparams.srcsrvdb || ''', tds_version ''7.1'')';
-
-    PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
-    EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', username ''' || f_srcrole || ''')';
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', username ''' || f_srcrole || ''')';
-    PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
-    IF NOT FOUND THEN
-      PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
-      EXECUTE 'SET ROLE ' || schemaowner;
-      EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
-      RESET ROLE;
-    END IF;
-
-  --
-  -- MONGO FDW
-  --
-  ELSIF v_srcdbtech='mongo' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating extension mongo_fdw...');
-    CREATE EXTENSION IF NOT EXISTS mongo_fdw;
-
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER mongo_fdw OPTIONS (address ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''')';
-
-    PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
-    EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
-    EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
-    PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
-    IF NOT FOUND THEN
-      PERFORM custanon.logging(sourcedbid, 'Importing Foreign collections/tables...');
-      EXECUTE 'SET ROLE ' || schemaowner;
-      -- There is no import foreign schema available with mongodb because mongodb is schemaless
-      -- So we will use the f_srcschema variable as the name of the collection to import in a foreign table
-      -- EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
-      EXECUTE 'CREATE FOREIGN TABLE IF NOT EXISTS ' || srcschema || '.' || f_srcschema || '(__doc json) SERVER ' || sourcefdw || ' OPTIONS (database ''' || srcsrvparams.srcsrvdb || ''', collection ''' || f_srcschema || ''')';
-      RESET ROLE;
-    END IF;
-
-  --
-  -- DUMMY
-  --
-  ELSIF v_srcdbtech='dummy' THEN
-  ELSE
-    PERFORM custanon.logging(sourcedbid, 'Unsupported database engine. Aborting.');
-    RETURN 'Unsupported database engine. Aborting.';
-  END IF;
-
-  -- in case the CSV file describing the anonymizaton rules is existing
-  -- we configure the FDW on it to read it. Then we check if a SALT is
-  -- defined for the anonymization, and we create updatable views if some are
-  -- defined in the CSV file for complex anonymization using joins between
-  -- several SQL tables
-  --
-  IF csvfile<>'create' THEN
-    -- configure file FDW
-    --TRUNCATE custanon.anonrules;
-    PERFORM custanon.logging(sourcedbid, 'Creating extension file_fdw...');
-    CREATE EXTENSION IF NOT EXISTS file_fdw;
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || anonrulesfdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || anonrulesfdw || ' FOREIGN DATA WRAPPER file_fdw';
-    PERFORM custanon.logging(sourcedbid, 'Creating foreign table ' || anonrulesfdw || ' using CSV file ' || csvfile);
-    EXECUTE 'CREATE FOREIGN TABLE IF NOT EXISTS custanon.' || anonrulesfdw || '(tbl text, col text, enabled text, anonfunc text, custom text, condition text, pretransformer text, transformer text) SERVER ' || anonrulesfdw || ' OPTIONS (filename ''' || csvfile || ''', format ''csv'', header ''true'', delimiter '';'')';
-
-    -- register the salt if configured
-    --
-    PERFORM custanon.logging(sourcedbid, 'Configuring salt for pseudonymization if existing...');
-    EXECUTE 'SELECT col FROM custanon.' || anonrulesfdw || ' WHERE tbl=''#SALT#''' INTO salt;
-    IF salt IS NOT NULL THEN
-      PERFORM custanon.logging(sourcedbid, '  Salt value: ' || salt);
-      salt := '''''''''' || salt || '''''''''';
-    ELSE
-      PERFORM custanon.logging(sourcedbid, '  Salt value: NULL');
-      salt := 'NULL';
-    END IF;
-
-    -- create updatable views if needed
-    --
-    PERFORM custanon.logging(sourcedbid, 'Creating updatable views...');
-    FOR r1 IN EXECUTE format('SELECT tbl, right(col, length(col)-4) AS uvquery, custom AS updatequery FROM custanon.%I WHERE left(col, 4)=''#UV#''', anonrulesfdw)
-    LOOP
-      PERFORM custanon.logging(sourcedbid, '  Creating updatable view: ' || srcschema || '.' || r1.tbl);
-      EXECUTE 'DROP VIEW IF EXISTS ' || srcschema || '.' || r1.tbl || ' CASCADE';
-      EXECUTE 'CREATE VIEW ' || srcschema || '.' || r1.tbl || ' AS ' || r1.uvquery;
-      IF r1.updatequery IS NOT NULL THEN
-        EXECUTE 'CREATE OR REPLACE RULE ' || r1.tbl || '_urule AS ON UPDATE TO ' || srcschema || '.' || r1.tbl || ' DO INSTEAD ' || r1.updatequery;
-      END IF;
-    END LOOP;
-  END IF;
-
-  -- AUTODISCOVERY
-  -- If autorules mode is requested, determine what is the best anonymization
-  -- method to be used for all columns of all SQL tables of the source database.
-  -- So here the CSV file describing the anonymization rules will be either
-  -- created if this is what is requested, or updated if it is already existing.
-  --
-  IF v_dstdbtech='autorules' THEN
-    PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
-
-    -- EXIT
-    RETURN '';
-  END IF;
-
-  -- Compute complexity indices for all SQL tables to be anonymized.
+CREATE FUNCTION custanon.gar_generic_complexityindices(sourcedbid bigint, v_srcdbtech text, srcschema text, schemaowner text, anonrulesfdw text, counters_reset boolean) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  initstart timestamp;
+  initduration interval;
+  r1 RECORD;
+BEGIN
+  -- compute complexity indices for all SQL tables to be anonymized.
   -- This will sort the order of execution of the anonymization by
   -- table complexity. Those indices will be used to give an idea of the
   -- time needed to anonymize everything.
@@ -1141,55 +1022,94 @@ BEGIN
   -- we use a complexity number depending of what are the anonymizaton
   -- methods used on the columns of the tables and we multiply both to get
   -- the complexity indice.
-  -- 
+  --
   PERFORM custanon.logging(sourcedbid, 'Counting number of tuples for tables to be anonymized...');
   EXECUTE 'GRANT ALL ON TABLE custanon.counts TO ' || schemaowner;
   IF counters_reset=true THEN
     PERFORM custanon.logging(sourcedbid, '  Reset counters...');
     DELETE FROM custanon.counts WHERE dbid=sourcedbid;
   END IF;
+
   FOR r1 IN EXECUTE format('SELECT DISTINCT t0.tbl FROM custanon.%I t0 LEFT JOIN custanon.counts t1 ON (t0.tbl=t1.tbl AND t1.dbid=%s) WHERE t0.tbl<>''#SALT#'' AND left(t0.col, 4)<>''#UV#'' AND t0.enabled<>''%s'' AND t1.tbl IS NULL', anonrulesfdw, sourcedbid, 'false')
   LOOP
     PERFORM custanon.logging(sourcedbid, '  Counting for ' || r1.tbl || '...');
+    initstart := clock_timestamp();
     EXECUTE 'SET ROLE ' || schemaowner;
-    EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', count(*) FROM ' || srcschema || '.' || r1.tbl || ';';
+    IF v_srcdbtech='oracle' THEN
+      -- when NOT using DBMS_STATS package in the Oracle DB:
+      -- EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', count(*) FROM ' || srcschema || '.' || r1.tbl || ';';
+      -- when using DBMS_STATS package in the Oracle DB:
+      EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', num_rows FROM ' || srcschema || '.user_tables WHERE table_name=''' || r1.tbl || ''';';
+    ELSE
+      EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', count(*) FROM ' || srcschema || '.' || r1.tbl || ';';
+    END IF;
     RESET ROLE;
+    initduration := clock_timestamp()-initstart;
+    UPDATE custanon.counts SET init_startedat=initstart, init_time=initduration WHERE dbid=sourcedbid AND tbl=r1.tbl;
   END LOOP;
 
+  -- compute the so called complexity indice of the SQL tables according to 
+  -- the arbitrary weights we have defined for various pseudonymization functions.
+  -- we'll need to find another way to define those weights in the future, 
+  -- for example via using a SQL table having the weight for the mot common
+  -- pseudonymization functions we always use
+  --
   PERFORM custanon.logging(sourcedbid, 'Computing anonymization complexity...');
   DELETE FROM custanon.complexity WHERE dbid=sourcedbid;
   EXECUTE 'INSERT INTO custanon.complexity(dbid, tbl, col, nbtuples, complexity) SELECT ' || sourcedbid || ', t0.tbl, t0.col, t1.nb, CASE WHEN t0.anonfunc ILIKE ''null'' THEN 1 WHEN t0.anonfunc ILIKE ''anon\.constant%'' THEN 1 WHEN t0.anonfunc ILIKE ''anon\.random_int_between%'' THEN 2 WHEN t0.anonfunc ILIKE ''%\.fake%'' THEN 3 WHEN t0.anonfunc ILIKE ''custom'' THEN 5 WHEN t0.anonfunc ILIKE ''%\.pseudo%'' THEN 10 WHEN t0.anonfunc ILIKE ''%concat%'' THEN 20 WHEN t0.anonfunc ILIKE ''condition'' THEN 20 ELSE 0 END FROM custanon.' || anonrulesfdw || ' t0, custanon.counts t1 WHERE t0.tbl<>''#SALT#'' AND left(t0.col, 4)<>''#UV#'' AND t0.enabled<>''false'' AND t0.tbl=t1.tbl AND t1.dbid=' || sourcedbid;
   WITH t0 AS (SELECT c.tbl, sum(c.nbtuples*c.complexity) AS indix FROM custanon.complexity AS c WHERE c.dbid=sourcedbid GROUP BY c.tbl) UPDATE custanon.counts AS t1 SET complexity=t0.indix FROM t0 WHERE t1.tbl=t0.tbl AND t1.dbid=sourcedbid;
 
-  -- Then we come to the point where we create the real anonymization rules
-  -- in the format that's needed by the anon extension.
-  -- We start to generate simple anonymization rules including pre-transformers
-  --
-  PERFORM custanon.logging(sourcedbid, 'Generating simple anonymization functions including pre-transformers...');
-  proc := format($internal$
-    UPDATE custanon.complexity AS t1 SET anon_func=CASE
-        WHEN anonfunc ILIKE 'null' THEN
-                anonfunc
-        WHEN anonfunc ILIKE 'anon\.constant%%' THEN
-                '''''' || pg_catalog.substring(anonfunc, 'anon.constant\(\''(.*)\''\)') || ''''''
-        WHEN anonfunc ILIKE 'anon\.random_int_between%%' THEN
-                anonfunc
-        WHEN anonfunc ILIKE '%%\.fake%%' THEN
-                anonfunc || '()'
-        WHEN anonfunc ILIKE '%%\.pseudo%%' THEN
-                CASE WHEN t0.pretransformer IS NULL THEN
-                        anonfunc || '(' || '%s' || '.' || t1.tbl || '.' || t1.col || ', ' || '%s' || ')'
-                ELSE
-                        anonfunc || '(' || replace(t0.pretransformer, '#F#', '%s' || '.' || t1.tbl || '.' || t1.col) || ', ' || '%s' || ')'
-                END
-        WHEN anonfunc ILIKE 'condition' THEN
-                pg_catalog.replace(t0.condition, 'col', '%s' || '.' || t1.tbl || '.' || t1.col)
-        END
-    FROM custanon.%I t0 WHERE ((t0.enabled='true' AND '%s'='same') OR (t0.enabled<>'false' AND '%s'<>'same')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t0.anonfunc NOT ILIKE 'pg_catalog\.concat%%' AND t1.dbid=%s;
-  $internal$, srcschema, salt, srcschema, salt, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid);
-  EXECUTE proc;
+  RETURN '';
+END;
+$$;
 
-  -- Then we generate the concat anonymization rules
+
+ALTER FUNCTION custanon.gar_generic_complexityindices(sourcedbid bigint, v_srcdbtech text, srcschema text, schemaowner text, anonrulesfdw text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_createanonjobs(bigint, text, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_createanonjobs(sourcedbid bigint, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  i integer;
+  nbjobs integer := (SELECT custanon.getconfig('jobs', '4')::integer);
+BEGIN
+  -- The custanon.gar_generic_createanonjobs function configure the parallel
+  -- jobs that will be used to anonymize everything, when the output mode
+  -- is everything but not pg_dump.
+  -- 
+  PERFORM custanon.logging(sourcedbid, 'Creating ' || nbjobs || ' anonymization jobs to anonymize DB source ID ' || sourcedbid || '...');
+  UPDATE custanon.counts SET anon_time=NULL, csvinject_time=NULL, rebuild_time=NULL, startedat=NULL, endedat=NULL, pid=NULL WHERE dbid=sourcedbid;
+  UPDATE custanon.counts SET tobeprocessed=true WHERE enabled=true AND nb>0 AND dbid=sourcedbid;
+  DELETE FROM custanon.parallel t0 WHERE t0.dbid=sourcedbid AND t0.projectname=v_projectname AND t0.maskrole=v_maskrole AND t0.maskschema=v_maskschema;
+
+  FOR i IN 1..nbjobs LOOP
+    INSERT INTO custanon.parallel(state, dbid, projectname, maskrole, maskschema, dstdbtech) VALUES ('wait', sourcedbid, v_projectname, v_maskrole, v_maskschema, v_dstdbtech);
+  END LOOP;
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.gar_generic_createanonjobs(sourcedbid bigint, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_generateconcatrules(bigint, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_generateconcatrules(sourcedbid bigint, v_dstdbtech text, anonrulesfdw text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+DECLARE
+  proc TEXT;
+BEGIN
+  -- The custanon.gar_generic_generateconcatrules function generates concat anonymization rules
   --
   PERFORM custanon.logging(sourcedbid, 'Generating concat anonymization functions...');
   proc := format($internal$
@@ -1213,7 +1133,30 @@ BEGIN
   $internal$, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid, sourcedbid, sourcedbid);
   EXECUTE proc;
 
-  -- Then we generate custom SQL anonymization functions including pre-transformers
+  RETURN '';
+END;
+$_$;
+
+
+ALTER FUNCTION custanon.gar_generic_generateconcatrules(sourcedbid bigint, v_dstdbtech text, anonrulesfdw text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_generatecustomrules(bigint, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_generatecustomrules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+DECLARE
+  customid integer;
+  proc TEXT;
+  r1 RECORD;
+BEGIN
+  -- The custanon.gar_generic_generatecustomrules function generates custom anonymization
+  -- functions including pre-transformers. Customized anonymization functions are created
+  -- thanks to the on the fly creation of PostgreSQL functions that contain the code of the
+  -- anonymization process to be used, provided inside the CSV file describing the rules.
   --
   PERFORM custanon.logging(sourcedbid, 'Generating custom anonymization functions including pre-transformers...');
   FOR r1 IN EXECUTE format('SELECT DISTINCT md5(t0.custom) AS md5sum, t0.custom FROM custanon.%I t0 WHERE t0.anonfunc ILIKE ''custom'' AND t0.custom IS NOT NULL AND ((t0.enabled=''true'' AND ''%s''=''same'') OR (t0.enabled<>''false'' AND ''%s''<>''same''))', anonrulesfdw, v_dstdbtech, v_dstdbtech)
@@ -1242,12 +1185,35 @@ BEGIN
 --      END;
     END IF;
   END LOOP;
+
   FOR r1 IN EXECUTE format('SELECT t0.tbl, t0.col, CASE WHEN t0.pretransformer IS NULL THEN ''custanon.custom_'' || t1.id || ''('' || ''%s'' || ''.'' || t0.tbl || ''.'' || t0.col || '')'' ELSE ''custanon.custom_'' || t1.id || ''('' || replace(t0.pretransformer, ''#F#'', ''%s'' || ''.'' || t0.tbl || ''.'' || t0.col) || '')'' END AS custfunc FROM custanon.%I t0, custanon.customs t1 WHERE md5(t0.custom)=t1.md5sum AND t1.created=true AND t0.anonfunc ILIKE ''custom'' AND t0.custom IS NOT NULL AND ((t0.enabled=''true'' AND ''%s''=''same'') OR (t0.enabled<>''false'' AND ''%s''<>''same''))', srcschema, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech)
   LOOP
-    UPDATE custanon.complexity AS t100 SET anon_func=r1.custfunc WHERE t100.tbl=r1.tbl AND t100.col=r1.col AND t100.dbid=sourcedbid;
-  END LOOP;
+    UPDATE custanon.complexity AS t100 SET anon_func=r1.custfunc WHERE t100.tbl=r1.tbl AND t100.col=r1.col AND t100.dbid=sourcedbid;    END LOOP;
 
-  -- Then we apply the post-transformer rules
+  RETURN '';
+END;
+$_$;
+
+
+ALTER FUNCTION custanon.gar_generic_generatecustomrules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_generatefinalrules(bigint, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_generatefinalrules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+DECLARE
+  noanon bigint;
+  withanon bigint;
+  proc TEXT;
+BEGIN
+  -- the custanon.gar_generic_generatefinalrules function apply post-transformers
+  -- and generate the final rules for the anon extension
+  --
+  -- apply the post-transformer rules
   --
   PERFORM custanon.logging(sourcedbid, 'Applying post-transformers...');
   EXECUTE 'UPDATE custanon.complexity AS t1 SET anon_func=replace(t0.transformer, ''#F#'', anon_func) FROM custanon.' || anonrulesfdw || ' t0 WHERE ((t0.enabled=''true'' AND ''' || v_dstdbtech || '''=''same'') OR (t0.enabled<>''false'' AND ''' || v_dstdbtech || '''<>''same'')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t1.anon_func IS NOT NULL AND t0.transformer IS NOT NULL AND t1.dbid=' || sourcedbid;
@@ -1288,64 +1254,445 @@ BEGIN
   PERFORM custanon.logging(sourcedbid, 'Number of tables having 0 tuples requiring no anonymization: ' || noanon);
   PERFORM custanon.logging(sourcedbid, 'Number of tables requiring anonymization: ' || withanon);
 
-  -- At the end of the day, we apply all anonymization rules defined
-  -- built previously, to the anon extension
+  RETURN '';
+END;
+$_$;
+
+
+ALTER FUNCTION custanon.gar_generic_generatefinalrules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_generatesimplerules(bigint, text, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_generatesimplerules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text, salt text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+DECLARE
+  proc TEXT;
+BEGIN
+  -- The custanon.gar_generic_generatesimplerules function creates the
+  -- real anonymization rules
+  -- in the format that's needed by the anon extension.
+  -- We start to generate simple anonymization rules including pre-transformers
+  -- thanks to this function.
+  -- 
+  PERFORM custanon.logging(sourcedbid, 'Generating simple anonymization functions including pre-transformers...');
+  proc := format($internal$
+    UPDATE custanon.complexity AS t1 SET anon_func=CASE
+        WHEN anonfunc ILIKE 'null' THEN
+                anonfunc
+        WHEN anonfunc ILIKE 'anon\.constant%%' THEN
+                '''''' || pg_catalog.substring(anonfunc, 'anon.constant\(\''(.*)\''\)') || ''''''
+        WHEN anonfunc ILIKE 'anon\.random_int_between%%' THEN
+                anonfunc
+        WHEN anonfunc ILIKE '%%\.fake%%' THEN
+                anonfunc || '()'
+        WHEN anonfunc ILIKE '%%\.pseudo%%' THEN
+                CASE WHEN t0.pretransformer IS NULL THEN
+                        anonfunc || '(' || '%s' || '.' || t1.tbl || '.' || t1.col || ', ' || '%s' || ')'
+                ELSE
+                        anonfunc || '(' || replace(t0.pretransformer, '#F#', '%s' || '.' || t1.tbl || '.' || t1.col) || ', ' || '%s' || ')'
+                END
+        WHEN anonfunc ILIKE 'condition' THEN
+                pg_catalog.replace(t0.condition, 'col', '%s' || '.' || t1.tbl || '.' || t1.col)
+        END
+    FROM custanon.%I t0 WHERE ((t0.enabled='true' AND '%s'='same') OR (t0.enabled<>'false' AND '%s'<>'same')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t0.anonfunc NOT ILIKE 'pg_catalog\.concat%%' AND t1.dbid=%s;
+  $internal$, srcschema, salt, srcschema, salt, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid);
+  EXECUTE proc;
+
+  RETURN '';
+END;
+$_$;
+
+
+ALTER FUNCTION custanon.gar_generic_generatesimplerules(sourcedbid bigint, v_dstdbtech text, srcschema text, anonrulesfdw text, salt text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_prepare(bigint, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_prepare(sourcedbid bigint, srcschema text, schemaowner text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+BEGIN
+  -- The custanon.gar_generic_prepare prepares the land on the anonymization
+  -- PostgreSQL DB; It creates a dedicated user and associated schema that
+  -- will be used in the context of the anonymization
   --
-  PERFORM custanon.logging(sourcedbid, 'Applying anonymization rules...');
-  PERFORM custanon.logging(sourcedbid, '  Remove existing anonymization rules...');
-  FOR r1 IN SELECT relnamespace, relname, attname FROM anon.pg_masking_rules WHERE relnamespace=srcschema::regnamespace
+  PERFORM custanon.logging(sourcedbid, 'Creating local source schema ' || srcschema || ' owned by ' || schemaowner || '...');
+  PERFORM * FROM pg_roles WHERE rolname=schemaowner;
+  IF NOT FOUND THEN
+    EXECUTE 'CREATE USER ' || schemaowner;
+    EXECUTE 'GRANT pg_read_server_files TO ' || schemaowner;
+  END IF;
+  EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || srcschema || ' AUTHORIZATION ' || schemaowner;
+
+  EXECUTE 'GRANT USAGE ON SCHEMA custanon TO ' || schemaowner;
+
+  -- here below we can TRUST all existing functions that will be used for the
+  -- anonymization, from the point of view of the anon extension
+  --
+  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.concat_ws IS 'TRUSTED';
+  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.initcap IS 'TRUSTED';
+
+  EXECUTE 'GRANT ALL ON TABLE custanon.logs TO ' || schemaowner;
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.gar_generic_prepare(sourcedbid bigint, srcschema text, schemaowner text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_preparelocaltables(bigint, text, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_preparelocaltables(sourcedbid bigint, srcschema text, dstschema text, schemaowner text, v_maskrole text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  r1 RECORD;
+BEGIN
+  -- The custanon.gar_generic_preparelocaltables function is when the
+  -- output mode is "local". It prepares destination tables inside the
+  -- PostgreSQL server doing the anonymization for local destination.
+  -- "local" mode means the anonymized data from the source database
+  -- will be in fact in SQL tables created on the PostgreSQL server.
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating tables for local destination if needed...');
+  EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || dstschema || ' AUTHORIZATION ' || schemaowner;
+  EXECUTE 'GRANT USAGE ON SCHEMA ' || dstschema || ' TO ' || v_maskrole;
+  FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
   LOOP
-    EXECUTE format('SECURITY LABEL FOR anon ON COLUMN %I.%I.%I IS NULL', r1.relnamespace, r1.relname, r1.attname);
+    PERFORM custanon.logging(sourcedbid, '  Create or truncate table ' || dstschema || '.' || r1.tbl);
+    EXECUTE 'SET ROLE ' || schemaowner;
+    EXECUTE 'CREATE TABLE IF NOT EXISTS ' || dstschema || '.' || r1.tbl || ' (LIKE ' || srcschema || '.' || r1.tbl || ' INCLUDING CONSTRAINTS)';
+    EXECUTE 'GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON ' || dstschema || '.' || r1.tbl || ' TO ' || v_maskrole;
+    EXECUTE 'TRUNCATE ' || dstschema || '.' || r1.tbl;
+    RESET ROLE;
   END LOOP;
---  PERFORM anon.remove_masks_for_all_columns(); -- This one is to remove everything, which we don't want to not impact other existing source schemas
-  PERFORM custanon.logging(sourcedbid, '  Create new anonymization rules...');
-  FOR r1 IN SELECT t0.anon_rule FROM custanon.complexity t0 WHERE t0.anon_rule IS NOT NULL AND t0.dbid=sourcedbid
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.gar_generic_preparelocaltables(sourcedbid bigint, srcschema text, dstschema text, schemaowner text, v_maskrole text) OWNER TO ninjanon;
+
+--
+-- Name: gar_generic_readcsvrules(bigint, text, text, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.gar_generic_readcsvrules(sourcedbid bigint, srcschema text, csvfile text, anonrulesfdw text, OUT salt text) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  lv_salt TEXT;
+  r1 RECORD;
+BEGIN
+  -- The custanon.gar_generic_readcsvrules function uses the file FDW extension
+  -- in order to read the CSV file describing all the anonymization rules to configure
+  -- to anonymize a specific source database. Then it will create all updatable views
+  -- that are described in the CSV file.
+  --
+  -- configure file FDW
+  --TRUNCATE custanon.anonrules;
+  PERFORM custanon.logging(sourcedbid, 'Creating extension file_fdw...');
+  CREATE EXTENSION IF NOT EXISTS file_fdw;
+  PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || anonrulesfdw || '...');
+  EXECUTE 'CREATE SERVER IF NOT EXISTS ' || anonrulesfdw || ' FOREIGN DATA WRAPPER file_fdw';
+  PERFORM custanon.logging(sourcedbid, 'Creating foreign table ' || anonrulesfdw || ' using CSV file ' || csvfile);
+  EXECUTE 'CREATE FOREIGN TABLE IF NOT EXISTS custanon.' || anonrulesfdw || '(tbl text, col text, enabled text, anonfunc text, custom text, condition text, pretransformer text, transformer text) SERVER ' || anonrulesfdw || ' OPTIONS (filename ''' || csvfile || ''', format ''csv'', header ''true'', delimiter '';'')';
+
+  -- register the salt if configured
+  --
+  PERFORM custanon.logging(sourcedbid, 'Configuring salt for pseudonymization if existing...');
+  EXECUTE 'SELECT col FROM custanon.' || anonrulesfdw || ' WHERE tbl=''#SALT#''' INTO lv_salt;
+  IF lv_salt IS NOT NULL THEN
+    PERFORM custanon.logging(sourcedbid, '  Salt value: ' || lv_salt);
+    lv_salt := '''''''''' || lv_salt || '''''''''';
+  ELSE
+    PERFORM custanon.logging(sourcedbid, '  Salt value: NULL');
+    lv_salt := 'NULL';
+  END IF;
+
+  -- create updatable views if needed
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating updatable views...');
+  FOR r1 IN EXECUTE format('SELECT tbl, right(col, length(col)-4) AS uvquery, custom AS updatequery FROM custanon.%I WHERE left(col, 4)=''#UV#''', anonrulesfdw)
   LOOP
-    EXECUTE r1.anon_rule;
+    PERFORM custanon.logging(sourcedbid, '  Creating updatable view: ' || srcschema || '.' || r1.tbl);
+    EXECUTE 'DROP VIEW IF EXISTS ' || srcschema || '.' || r1.tbl || ' CASCADE';
+    EXECUTE 'CREATE VIEW ' || srcschema || '.' || r1.tbl || ' AS ' || r1.uvquery;
+    IF r1.updatequery IS NOT NULL THEN
+      EXECUTE 'CREATE OR REPLACE RULE ' || r1.tbl || '_urule AS ON UPDATE TO ' || srcschema || '.' || r1.tbl || ' DO INSTEAD ' || r1.updatequery;
+    END IF;
   END LOOP;
 
-  -- Drop CSV FDW
+  SELECT lv_salt INTO salt;
+END;
+$$;
+
+
+ALTER FUNCTION custanon.gar_generic_readcsvrules(sourcedbid bigint, srcschema text, csvfile text, anonrulesfdw text, OUT salt text) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules(bigint, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules(v_dbid bigint, csvfile text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  r1 RECORD;
+BEGIN
+  -- this version of the generate_anon_rules functions needs the database ID
+  -- as INPUT parameter. With that, connection parameters of the database will
+  -- be found and passed to the other generate_anon_rules function.
   --
-  PERFORM custanon.logging(sourcedbid, 'Closing CSV file ' || csvfile || '...');
-  EXECUTE 'DROP FOREIGN TABLE custanon.' || anonrulesfdw;
-  EXECUTE 'DROP SERVER ' || anonrulesfdw;
+  SELECT INTO r1 dbtech, sourceserver, sourceschema, sourcerole, datestyle FROM custanon.dbsources WHERE id=v_dbid;
+  IF NOT FOUND THEN
+    RETURN '';
+  END IF;
 
-  -- Anonymize a small part of the most complex table to compute
-  -- approximative duration of full DB anonymization.
+  RETURN custanon.generate_anon_rules(r1.dbtech::text, csvfile, r1.sourceserver, r1.sourcerole, NULL, r1.sourceschema, r1.datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+END;
+$$;
+
+
+ALTER FUNCTION custanon.generate_anon_rules(v_dbid bigint, csvfile text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules(text, text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules(v_srcdbtech text, csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+BEGIN
+  -- The custanon.generate_anon_rules function is one the main Ninjanon functions.
+  -- It will call the right generate_anon_rules(...) function according to the
+  -- database engine on which is running the database to be anonymized.
+  -- We aim to propose anonymization on several database engines:
+  --   PostgreSQL (of course...)
+  --   Oracle
+  --   MariaDB (and MYSQL btw)
+  --   MSSQL
+  --   MongoDB
   --
-  PERFORM custanon.logging(sourcedbid, 'Anonymize a ' || maxsample || ' tuples sample of the most time consuming table for generating statistics...');
-  EXECUTE 'GRANT pg_write_server_files TO ' || v_maskrole;
-  SELECT INTO sample srcschema || '.' || tbl AS tbl, nb, complexity FROM custanon.counts WHERE dbid=sourcedbid ORDER BY complexity DESC LIMIT 1;
-  PERFORM custanon.logging(sourcedbid, '  Sampling ' || sample.tbl || ' table...');
-  anonstart := clock_timestamp();
-  EXECUTE 'SET ROLE ' || v_maskrole;
-  EXECUTE 'COPY (SELECT * FROM ' || sample.tbl || ' LIMIT ' || maxsample || ') TO ''/var/tmp/test.csv'' WITH (FORMAT csv, HEADER, DELIMITER '';'')';
-  RESET ROLE;
-  anonend := clock_timestamp();
-  anonduration := anonend-anonstart;
-  PERFORM custanon.logging(sourcedbid, '  Sample anonymization made in ' || anonduration || '.');
+  IF v_srcdbtech='oracle' THEN
+    PERFORM custanon.generate_anon_rules_oracle(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+    RETURN '';
+  ELSIF v_srcdbtech='pgsql' THEN
+    PERFORM custanon.generate_anon_rules_pgsql(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+    RETURN '';
+  ELSIF v_srcdbtech='mariadb' THEN
+    PERFORM custanon.generate_anon_rules_mariadb(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+    RETURN '';
+  ELSIF v_srcdbtech='mssql' THEN
+    PERFORM custanon.generate_anon_rules_mssql(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+    RETURN '';
+  ELSIF v_srcdbtech='mongo' THEN
+    PERFORM custanon.generate_anon_rules_mongo(csvfile, f_srcserver, f_srcrole, f_srcpwdfile, f_srcschema, f_datestyle, v_dstdbtech, v_projectname, v_maskrole, v_maskschema, counters_reset);
+    RETURN '';
+  ELSIF v_srcdbtech='dummy' THEN
+  END IF;
 
-  PERFORM custanon.logging(sourcedbid, 'Computing projected anonymization time for all tables...');
-  sampleanonduration := anonduration*(sample.nb/maxsample);
-  UPDATE custanon.counts SET projected_anon_time=sampleanonduration*complexity/sample.complexity WHERE dbid=sourcedbid;
+  PERFORM custanon.logging('Unsupported database engine. Aborting.');
+  RETURN 'Unsupported database engine. Aborting.';
+END;
+$$;
 
-  fullanonduration := (SELECT sum(projected_anon_time) FROM custanon.counts WHERE enabled=true AND dbid=sourcedbid);
-  PERFORM custanon.logging(sourcedbid, 'Expected (estimated) duration for full anonymization is around ' || fullanonduration);
 
-  -- Check what are the tables without PK in case v_dstdbtech is "same".
-  -- Then here we create temporary PKs and matching indexes if needed.
-  -- PLEASE NOTE THAT at this time, we do it only for Oracle databases
-  -- because the Oracle FDW has a method allowing the execution of DDL
-  -- statements. It's not the case of the other FDWs for the other
-  -- database engine: for them, we'll have to implement another way of
-  -- doing the same thing.
-  -- "same" mode is for static anonymizaton, meaning the destination database
-  -- that will contain all the anonymized data is the same as the source
-  -- database.
+ALTER FUNCTION custanon.generate_anon_rules(v_srcdbtech text, csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules_mariadb(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules_mariadb(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  i integer;
+  sourcedbid bigint;
+  sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
+  analyzecnt bigint;
+  initstart timestamp;
+  initduration interval;
+  r1 RECORD;
+  srcsrvparams RECORD;
+  lv_pkinfo RECORD;
+  v_srcdbtech TEXT := 'mariadb';
+  salt TEXT;
+  sourcerolepwd TEXT;
+  sourcefdw TEXT;
+  anonrulesfdw TEXT;
+  srcschema TEXT;
+  dstschema TEXT;
+  schemaowner TEXT;
+
+BEGIN
+  -- The custanon.generate_anon_rules_oracle function is one the main Ninjanon functions.
+  -- It does several things to prepare the anonymization of a MariaDB or MYSQL database:
+  --   * record the source database to be anonymized and take its ID
+  --   * create the roles and anonymizaton schema needed, including GRANTS
+  --   * configure security labels on functions outside of the anon extension scope
+  --     that you might use for anonymization purposes (and don't forget to modify
+  --     this function to include others)
+  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
+  --     database to be anonymized. Here: MariaDB. Configure mapping users.
+  --     Import the foreign schema.
+  --   * run the Autodiscovery to create the CSV file of the anonymization rules
+  --     automatically if Autodiscovery mode is enabled by the user
+  --   * Create the FDW on the CSV file containing the anonymization rules and
+  --     interprete all the rules and configure the real anon extension rules
+  --     accordingly
+  --   * compute the complexity indicators for all tables to be anonymized:
+  --     this will set the order in which the SQL tables will have to be anonymized
+  --   * anonymize a small sample of the most complicated SQL table to compute
+  --     the time needed on this basis for all SQL tables to be anonymized
+  --   * check what are the SQL tables without Primary Key in order to create
+  --     a temporary one on each found SQL table. Also check if a column with
+  --     unique values would be existing to make it a temporary PK.
+  --   * prepare the things depending on the output mode selected for the results
+  --     of the anonymization and depending of the database engine used for the
+  --     source database to be anonymized (that can be disable all indexes,
+  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
+  --   * configure the parallel jobs depending of the output mode, that will be
+  --     in charge of the anonymization in parallel
   --
-  IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' THEN
+  srcschema := v_projectname || v_srcdbtech;
+  dstschema := v_projectname || v_dstdbtech;
+  schemaowner := v_projectname || 'adm';
+
+  PERFORM custanon.logging('Configuring source database...');
+  SELECT INTO srcsrvparams substring(f_srcserver, '^//(.*):') AS srcsrvname, substring(f_srcserver, '^//.*:([0-9]+)/') AS srcsrvport, substring(f_srcserver, '^//.*:[0-9]+/(.*)') AS srcsrvdb;
+  sourcedbid := (SELECT custanon.getdb(v_srcdbtech::custanon.dbengine, f_srcserver, f_srcschema, f_srcrole, f_srcpwdfile, f_datestyle));
+  sourcerolepwd := (SELECT custanon.pgp_sym_decrypt(sourcepwd, custanon.f_getjewel()) FROM custanon.dbsources WHERE id=sourcedbid);
+  sourcefdw := 'srcdb_' || sourcedbid;
+  anonrulesfdw := 'anonrules_' || sourcedbid;
+
+  -- update the counter of number of analysis
+  --
+  analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
+  INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
+
+  -- preparation steps: create dedicated schema, users, permissions...
+  --
+  PERFORM custanon.gar_generic_prepare(sourcedbid, srcschema, schemaowner);
+
+  -- configure MariaDB FDW on source DB
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating extension mysql_fdw...');
+  CREATE EXTENSION IF NOT EXISTS mysql_fdw;
+
+  PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
+  EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER mysql_fdw OPTIONS (host ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', fetch_size ''200'')';
+
+  PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
+  EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
+  PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
+  IF NOT FOUND THEN
+    PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+    EXECUTE 'IMPORT FOREIGN SCHEMA ' || srcsrvparams.srcsrvdb || ' FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
+    RESET ROLE;
+  END IF;
+
+  IF csvfile<>'create' THEN
+    -- Read CSV file describing anonymization rules
+    --
+    PERFORM custanon.gar_generic_readcsvrules(sourcedbid, srcschema, csvfile, anonrulesfdw, salt);
+  END IF;
+
+  -- AUTODISCOVERY
+  -- If autorules mode is requested, determine what is the best anonymization
+  -- method to be used
+  -- 
+  IF v_dstdbtech='autorules' THEN
+    PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
+
+    -- EXIT
+    RETURN '';
+  END IF;
+
+  -- compute complexity indices
+  --
+  PERFORM custanon.gar_generic_complexityindices(sourcedbid, v_srcdbtech, srcschema, schemaowner, anonrulesfdw, counters_reset);
+
+  -- generate simple anonymization rules including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatesimplerules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw, salt);
+
+  -- generate concat anonymization rules
+  --
+  PERFORM custanon.gar_generic_generateconcatrules(sourcedbid, v_dstdbtech, anonrulesfdw);
+
+  -- generate custom anonymization functions including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatecustomrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- apply post-transformers and generate final rules
+  --
+  PERFORM custanon.gar_generic_generatefinalrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- Apply rules
+  --
+  PERFORM custanon.gar_generic_applyrules(sourcedbid, srcschema);
+
+  -- drop CSV FDW
+  --
+  PERFORM custanon.gar_generic_closecsvrules(sourcedbid, csvfile, anonrulesfdw);
+
+  -- anonymize a small part of the most complex table to compute approximative duration of full DB anonymization
+  --
+  PERFORM custanon.gar_generic_anonymizesample(sourcedbid, srcschema, v_maskrole);
+
+  -- disable all indexes, FKs, checks and set NOLOGGING on all tables
+  -- to be anonymized if mode is csvsplitinject or irdw
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- For PostgreSQL:
+    --
+    PERFORM custanon.logging(sourcedbid, '  Set NOLOGGING...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+
+    -- disable logging and set paralellism
+    --
+    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
+    LOOP
+      -- EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' NOLOGGING'')';
+    END LOOP;
+
+    RESET ROLE;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- check what are the tables without PK in case v_dstdbtech is same, csvsplitinject or irdw
+  -- and check what are the tables having a multi-columns PK
+  --
+  IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
     PERFORM custanon.logging(sourcedbid, 'Checking what are the tables without PK that cannot be statically anonymized...');
-    FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid LOOP
+    FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND (t0.anon_pk=false AND t0.anon_ui=false) AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid
+    LOOP
+      initstart := clock_timestamp();
+
       PERFORM FROM (
         SELECT CASE WHEN attfdwoptions IS NULL THEN '' ELSE   '(' || pg_catalog.array_to_string(ARRAY(SELECT pg_catalog.quote_ident(option_name) || ' ' || pg_catalog.quote_literal(option_value) FROM pg_catalog.pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions
         FROM pg_catalog.pg_attribute a
@@ -1372,7 +1719,6 @@ BEGIN
 
         -- set key 'true' option if a column that can be used as a PK has been found
         -- else add a new serial column to the source table with a PK on it
-        --
         -- IF i<>0 THEN
         --   PERFORM custanon.logging(sourcedbid, '      Found column ' || pkcol || ' that can be used as a PK');
         --   IF v_srcdbtech='oracle' THEN
@@ -1393,92 +1739,55 @@ BEGIN
 -- select t0.table_name, t0.index_name, string_agg(t1.column_name, ', ' order by t1.column_position) as cols FROM custanon.counts t00, samoracle.user_constraints t0, samoracle.user_ind_columns t1 WHERE t0.constraint_type='P' and t00.tbl=t0.table_name and t0.table_name=t1.table_name and t0.index_name=t1.index_name and t00.nb>0 and t00.dbid=21 group by t0.table_name, t0.index_name order by t0.table_name, t0.index_name;
   END IF;
 
-  -- if output mode is "local", prepare destination tables inside the 
-  -- PostgreSQL server doing the anonymization for local destination.
-  -- "local" mode means the anonymized data from the source database
-  -- will be in fact in SQL tables created on the PostgreSQL server.
+-- ####################
+-- ####################
+-- ####################
+
+  -- prepare destination tables for local destination
   --
   IF v_dstdbtech='local' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating tables for local destination if needed...');
-    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || dstschema || ' AUTHORIZATION ' || schemaowner;
-    EXECUTE 'GRANT USAGE ON SCHEMA ' || dstschema || ' TO ' || v_maskrole;
-    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
-    LOOP
-      PERFORM custanon.logging(sourcedbid, '  Create or truncate table ' || dstschema || '.' || r1.tbl);
-      EXECUTE 'SET ROLE ' || schemaowner;
-      EXECUTE 'CREATE TABLE IF NOT EXISTS ' || dstschema || '.' || r1.tbl || ' (LIKE ' || srcschema || '.' || r1.tbl || ' INCLUDING CONSTRAINTS)';
-      EXECUTE 'GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON ' || dstschema || '.' || r1.tbl || ' TO ' || v_maskrole;
-      EXECUTE 'TRUNCATE ' || dstschema || '.' || r1.tbl;
-      RESET ROLE;
-    END LOOP;
+    PERFORM custanon.gar_generic_preparelocaltables(sourcedbid, srcschema, dstschema, schemaowner, v_maskrole);
   END IF;
 
-  -- disable all indexes, FKs, checks and set NOLOGGING on all tables
-  -- to be anonymized if mode is csvsplitinject
-  IF v_dstdbtech='csvsplitinject' THEN
+  -- compute table parts if mode is csvsplitinject
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
     -- configure the splitter_read table
     PERFORM custanon.splitter_read(v_dstdbtech, v_projectname, sourcedbid);
   END IF;
 
-  -- If the output mode is everything but not pg_dump, we configure the parallel
-  -- jobs that will be used to anonymize everything
-  --
   IF v_dstdbtech<>'pg_dump' THEN
     -- anonymize all tables using X jobs
-    PERFORM custanon.logging(sourcedbid, 'Creating ' || nbjobs || ' anonymization jobs to anonymize DB source ID ' || sourcedbid || '...');
-    UPDATE custanon.counts SET anon_time=NULL, csvinject_time=NULL, rebuild_time=NULL, startedat=NULL, endedat=NULL, pid=NULL WHERE dbid=sourcedbid;
-    UPDATE custanon.counts SET tobeprocessed=true WHERE enabled=true AND nb>0 AND dbid=sourcedbid;
-    DELETE FROM custanon.parallel t0 WHERE t0.dbid=sourcedbid AND t0.projectname=v_projectname AND t0.maskrole=v_maskrole AND t0.maskschema=v_maskschema;
-
-    FOR i IN 1..nbjobs LOOP
-      INSERT INTO custanon.parallel(state, dbid, projectname, maskrole, maskschema, dstdbtech) VALUES ('wait', sourcedbid, v_projectname, v_maskrole, v_maskschema, v_dstdbtech);
-    END LOOP;
+    --
+    PERFORM custanon.gar_generic_createanonjobs(sourcedbid, v_dstdbtech, v_projectname, v_maskrole, v_maskschema);
   END IF;
 
   RETURN '';
 END;
-$_$;
+$$;
 
 
-ALTER FUNCTION custanon.generate_anon_rules(v_srcdbtech text, csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+ALTER FUNCTION custanon.generate_anon_rules_mariadb(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
 
 --
--- Name: generate_anon_rules_oracle(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+-- Name: generate_anon_rules_mongo(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
-CREATE FUNCTION custanon.generate_anon_rules_oracle(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+CREATE FUNCTION custanon.generate_anon_rules_mongo(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
     LANGUAGE plpgsql
     SET search_path TO 'pg_catalog', 'pg_temp'
-    AS $_$
+    AS $$
 DECLARE
   i integer;
-  customid integer;
   sourcedbid bigint;
   sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
-  nbjobs integer := (SELECT custanon.getconfig('jobs', '4')::integer);
-  maxsample bigint := (SELECT custanon.getconfig('maxsample', '50000')::bigint);
-  noanon bigint;
-  withanon bigint;
   analyzecnt bigint;
-  nblines integer;
-  nbtuples integer;
-  numentry integer;
-  anonstart timestamp;
   initstart timestamp;
-  anonend timestamp;
-  anonduration interval;
-  fullanonduration interval;
-  sampleanonduration interval;
   initduration interval;
-  bestmethod RECORD;
-  data_bestmethod RECORD;
   r1 RECORD;
-  r2 RECORD;
-  sample RECORD;
   srcsrvparams RECORD;
   lv_pkinfo RECORD;
-  v_srcdbtech TEXT := 'oracle';
-  request TEXT;
+  v_srcdbtech TEXT := 'mongo';
   salt TEXT;
   sourcerolepwd TEXT;
   sourcefdw TEXT;
@@ -1486,11 +1795,37 @@ DECLARE
   srcschema TEXT;
   dstschema TEXT;
   schemaowner TEXT;
-  result TEXT;
-  pkcol TEXT;
-  proc TEXT;
-  newcol TEXT;
+
 BEGIN
+  -- The custanon.generate_anon_rules_oracle function is one the main Ninjanon functions.
+  -- It does several things to prepare the anonymization of a Mongo database:
+  --   * record the source database to be anonymized and take its ID
+  --   * create the roles and anonymizaton schema needed, including GRANTS
+  --   * configure security labels on functions outside of the anon extension scope
+  --     that you might use for anonymization purposes (and don't forget to modify
+  --     this function to include others)
+  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
+  --     database to be anonymized. Here: Mongo. Configure mapping users.
+  --     Import the foreign schema.
+  --   * run the Autodiscovery to create the CSV file of the anonymization rules
+  --     automatically if Autodiscovery mode is enabled by the user
+  --   * Create the FDW on the CSV file containing the anonymization rules and
+  --     interprete all the rules and configure the real anon extension rules
+  --     accordingly
+  --   * compute the complexity indicators for all tables to be anonymized:
+  --     this will set the order in which the SQL tables will have to be anonymized
+  --   * anonymize a small sample of the most complicated SQL table to compute
+  --     the time needed on this basis for all SQL tables to be anonymized
+  --   * check what are the SQL tables without Primary Key in order to create
+  --     a temporary one on each found SQL table. Also check if a column with
+  --     unique values would be existing to make it a temporary PK.
+  --   * prepare the things depending on the output mode selected for the results
+  --     of the anonymization and depending of the database engine used for the
+  --     source database to be anonymized (that can be disable all indexes,
+  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
+  --   * configure the parallel jobs depending of the output mode, that will be
+  --     in charge of the anonymization in parallel
+  --
   srcschema := v_projectname || v_srcdbtech;
   dstschema := v_projectname || v_dstdbtech;
   schemaowner := v_projectname || 'adm';
@@ -1503,25 +1838,526 @@ BEGIN
   anonrulesfdw := 'anonrules_' || sourcedbid;
 
   -- update the counter of number of analysis
+  --
   analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
   INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
 
-  PERFORM custanon.logging(sourcedbid, 'Creating local source schema ' || srcschema || ' owned by ' || schemaowner || '...');
-  PERFORM * FROM pg_roles WHERE rolname=schemaowner;
+  -- preparation steps: create dedicated schema, users, permissions...
+  --
+  PERFORM custanon.gar_generic_prepare(sourcedbid, srcschema, schemaowner);
+
+  -- configure MONGO FDW on source DB
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating extension mongo_fdw...');
+  CREATE EXTENSION IF NOT EXISTS mongo_fdw;
+
+  PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
+  EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER mongo_fdw OPTIONS (address ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''')';
+
+  PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
+  EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "username" ''' || f_srcrole || ''')';
+  PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
   IF NOT FOUND THEN
-    EXECUTE 'CREATE USER ' || schemaowner;
-    EXECUTE 'GRANT pg_read_server_files TO ' || schemaowner;
+    PERFORM custanon.logging(sourcedbid, 'Importing Foreign collections/tables...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+    -- There is no import foreign schema available with mongodb because mongodb is schemaless
+    -- So we will use the f_srcschema variable as the name of the collection to import in a foreign table
+    -- EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
+    EXECUTE 'CREATE FOREIGN TABLE IF NOT EXISTS ' || srcschema || '.' || f_srcschema || '(__doc json) SERVER ' || sourcefdw || ' OPTIONS (database ''' || srcsrvparams.srcsrvdb || ''', collection ''' || f_srcschema || ''')';
+    RESET ROLE;
   END IF;
-  EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || srcschema || ' AUTHORIZATION ' || schemaowner;
 
-  EXECUTE 'GRANT USAGE ON SCHEMA custanon TO ' || schemaowner;
+  IF csvfile<>'create' THEN
+    -- Read CSV file describing anonymization rules
+    --
+    PERFORM custanon.gar_generic_readcsvrules(sourcedbid, srcschema, csvfile, anonrulesfdw, salt);
+  END IF;
 
-  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.concat_ws IS 'TRUSTED';
-  SECURITY LABEL FOR anon ON FUNCTION pg_catalog.initcap IS 'TRUSTED';
+  -- AUTODISCOVERY
+  -- If autorules mode is requested, determine what are the best anonymization
+  -- methods to be used
+  --
+  IF v_dstdbtech='autorules' THEN
+    PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
 
-  EXECUTE 'GRANT ALL ON TABLE custanon.logs TO ' || schemaowner;
+    -- EXIT
+    RETURN '';
+  END IF;
 
-  -- configure FDW on source DB
+  -- compute complexity indices
+  --
+  PERFORM custanon.gar_generic_complexityindices(sourcedbid, v_srcdbtech, srcschema, schemaowner, anonrulesfdw, counters_reset);
+
+  -- generate simple anonymization rules including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatesimplerules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw, salt);
+
+  -- generate concat anonymization rules
+  --
+  PERFORM custanon.gar_generic_generateconcatrules(sourcedbid, v_dstdbtech, anonrulesfdw);
+
+  -- generate custom anonymization functions including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatecustomrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- apply post-transformers and generate final rules
+  --
+  PERFORM custanon.gar_generic_generatefinalrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- Apply rules
+  --
+  PERFORM custanon.gar_generic_applyrules(sourcedbid, srcschema);
+
+  -- drop CSV FDW
+  --
+  PERFORM custanon.gar_generic_closecsvrules(sourcedbid, csvfile, anonrulesfdw);
+
+  -- anonymize a small part of the most complex table to compute approximative duration of full DB anonymization
+  --
+  PERFORM custanon.gar_generic_anonymizesample(sourcedbid, srcschema, v_maskrole);
+
+  -- disable all indexes, FKs, checks and set NOLOGGING on all tables
+  -- to be anonymized if mode is csvsplitinject or irdw
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- For PostgreSQL:
+    --
+    PERFORM custanon.logging(sourcedbid, '  Set NOLOGGING...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+
+    -- disable logging and set paralellism
+    --
+    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
+    LOOP
+      -- EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' NOLOGGING'')';
+    END LOOP;
+
+    RESET ROLE;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- check what are the tables without PK in case v_dstdbtech is same, csvsplitinject or irdw
+  -- and check what are the tables having a multi-columns PK
+  --
+  IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables without PK that cannot be statically anonymized...');
+    FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND (t0.anon_pk=false AND t0.anon_ui=false) AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid
+    LOOP
+      initstart := clock_timestamp();
+
+      PERFORM FROM (
+        SELECT CASE WHEN attfdwoptions IS NULL THEN '' ELSE   '(' || pg_catalog.array_to_string(ARRAY(SELECT pg_catalog.quote_ident(option_name) || ' ' || pg_catalog.quote_literal(option_value) FROM pg_catalog.pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions
+        FROM pg_catalog.pg_attribute a
+        WHERE a.attrelid = r1.oid AND a.attnum > 0 AND NOT a.attisdropped AND attfdwoptions IS NOT NULL
+      ) AS t0
+      WHERE t0.attfdwoptions LIKE '%key ''true''%';
+      IF FOUND THEN
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has a PK');
+      ELSE
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has no PK');
+        UPDATE custanon.counts SET pk=false WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- PERFORM custanon.logging(sourcedbid, '    looking for columns on which it could be possible to create a PK...');
+        -- i := 0;
+        -- EXECUTE 'SET ROLE ' || schemaowner;
+        -- FOR r2 IN SELECT col FROM custanon.find_unique_columns(srcschema, r1.relname) WHERE is_unique=true
+        -- LOOP
+        --   PERFORM custanon.logging(sourcedbid, '      ' || r2.col);
+        --   IF i=0 THEN
+        --     pkcol := r2.col;
+        --     i := 1;
+        --   END IF;
+        -- END LOOP;
+        -- RESET ROLE;
+
+        -- set key 'true' option if a column that can be used as a PK has been found
+        -- else add a new serial column to the source table with a PK on it
+        -- IF i<>0 THEN
+        --   PERFORM custanon.logging(sourcedbid, '      Found column ' || pkcol || ' that can be used as a PK');
+        --   IF v_srcdbtech='oracle' THEN
+        --     EXECUTE 'SET ROLE ' || schemaowner;
+        --     EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' ADD CONSTRAINT PRIMARY KEY(' || pkcol || ')'')';
+        --     RESET ROLE;
+        --   END IF;
+        --   EXECUTE 'ALTER FOREIGN TABLE ' || srcschema || '.' || r1.relname || ' ALTER COLUMN ' || pkcol || ' OPTIONS (key ''true'')';
+        --   UPDATE custanon.counts SET pk=true WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- ELSE
+        -- END IF;
+      END IF;
+    END LOOP;
+
+    -- Create a new identity column with a unique index in case a PK is existing
+    -- but composed of several columns
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables with multi-columns PK...');
+-- select t0.table_name, t0.index_name, string_agg(t1.column_name, ', ' order by t1.column_position) as cols FROM custanon.counts t00, samoracle.user_constraints t0, samoracle.user_ind_columns t1 WHERE t0.constraint_type='P' and t00.tbl=t0.table_name and t0.table_name=t1.table_name and t0.index_name=t1.index_name and t00.nb>0 and t00.dbid=21 group by t0.table_name, t0.index_name order by t0.table_name, t0.index_name;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- prepare destination tables for local destination
+  --
+  IF v_dstdbtech='local' THEN
+    PERFORM custanon.gar_generic_preparelocaltables(sourcedbid, srcschema, dstschema, schemaowner, v_maskrole);
+  END IF;
+
+  -- compute table parts if mode is csvsplitinject
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- configure the splitter_read table
+    PERFORM custanon.splitter_read(v_dstdbtech, v_projectname, sourcedbid);
+  END IF;
+
+  IF v_dstdbtech<>'pg_dump' THEN
+    -- anonymize all tables using X jobs
+    --
+    PERFORM custanon.gar_generic_createanonjobs(sourcedbid, v_dstdbtech, v_projectname, v_maskrole, v_maskschema);
+  END IF;
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.generate_anon_rules_mongo(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules_mssql(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules_mssql(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  i integer;
+  sourcedbid bigint;
+  sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
+  analyzecnt bigint;
+  initstart timestamp;
+  initduration interval;
+  r1 RECORD;
+  srcsrvparams RECORD;
+  lv_pkinfo RECORD;
+  v_srcdbtech TEXT := 'mssql';
+  salt TEXT;
+  sourcerolepwd TEXT;
+  sourcefdw TEXT;
+  anonrulesfdw TEXT;
+  srcschema TEXT;
+  dstschema TEXT;
+  schemaowner TEXT;
+
+BEGIN
+  -- The custanon.generate_anon_rules_oracle function is one the main Ninjanon functions.
+  -- It does several things to prepare the anonymization of a PostgreSQL database:
+  --   * record the source database to be anonymized and take its ID
+  --   * create the roles and anonymizaton schema needed, including GRANTS
+  --   * configure security labels on functions outside of the anon extension scope
+  --     that you might use for anonymization purposes (and don't forget to modify
+  --     this function to include others)
+  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
+  --     database to be anonymized. Here: PostgreSQL. Configure mapping users.
+  --     Import the foreign schema.
+  --   * run the Autodiscovery to create the CSV file of the anonymization rules
+  --     automatically if Autodiscovery mode is enabled by the user
+  --   * Create the FDW on the CSV file containing the anonymization rules and
+  --     interprete all the rules and configure the real anon extension rules
+  --     accordingly
+  --   * compute the complexity indicators for all tables to be anonymized:
+  --     this will set the order in which the SQL tables will have to be anonymized
+  --   * anonymize a small sample of the most complicated SQL table to compute
+  --     the time needed on this basis for all SQL tables to be anonymized
+  --   * check what are the SQL tables without Primary Key in order to create
+  --     a temporary one on each found SQL table. Also check if a column with
+  --     unique values would be existing to make it a temporary PK.
+  --   * prepare the things depending on the output mode selected for the results
+  --     of the anonymization and depending of the database engine used for the
+  --     source database to be anonymized (that can be disable all indexes,
+  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
+  --   * configure the parallel jobs depending of the output mode, that will be
+  --     in charge of the anonymization in parallel
+  --
+  srcschema := v_projectname || v_srcdbtech;
+  dstschema := v_projectname || v_dstdbtech;
+  schemaowner := v_projectname || 'adm';
+
+  PERFORM custanon.logging('Configuring source database...');
+  SELECT INTO srcsrvparams substring(f_srcserver, '^//(.*):') AS srcsrvname, substring(f_srcserver, '^//.*:([0-9]+)/') AS srcsrvport, substring(f_srcserver, '^//.*:[0-9]+/(.*)') AS srcsrvdb;
+  sourcedbid := (SELECT custanon.getdb(v_srcdbtech::custanon.dbengine, f_srcserver, f_srcschema, f_srcrole, f_srcpwdfile, f_datestyle));
+  sourcerolepwd := (SELECT custanon.pgp_sym_decrypt(sourcepwd, custanon.f_getjewel()) FROM custanon.dbsources WHERE id=sourcedbid);
+  sourcefdw := 'srcdb_' || sourcedbid;
+  anonrulesfdw := 'anonrules_' || sourcedbid;
+
+  -- update the counter of number of analysis
+  --
+  analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
+  INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
+
+  -- preparation steps: create dedicated schema, users, permissions...
+  --
+  PERFORM custanon.gar_generic_prepare(sourcedbid, srcschema, schemaowner);
+
+  -- configure TDS FDW on source DB
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating extension tds_fdw...');
+  CREATE EXTENSION IF NOT EXISTS tds_fdw;
+
+  PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
+  EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER tds_fdw OPTIONS (servername ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', database ''' || srcsrvparams.srcsrvdb || ''', tds_version ''7.1'')';
+
+  PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
+  EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', username ''' || f_srcrole || ''')';
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', username ''' || f_srcrole || ''')';
+  PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
+  IF NOT FOUND THEN
+    PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+    EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
+    RESET ROLE;
+  END IF;
+
+  IF csvfile<>'create' THEN
+    -- Read CSV file describing anonymization rules
+    --
+    PERFORM custanon.gar_generic_readcsvrules(sourcedbid, srcschema, csvfile, anonrulesfdw, salt);
+  END IF;
+
+  -- AUTODISCOVERY
+  -- If autorules mode is requested, determine what are the best anonymization
+  -- methods to be used
+  --
+  IF v_dstdbtech='autorules' THEN
+    PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
+
+    -- EXIT
+    RETURN '';
+  END IF;
+
+  -- compute complexity indices
+  --
+  PERFORM custanon.gar_generic_complexityindices(sourcedbid, v_srcdbtech, srcschema, schemaowner, anonrulesfdw, counters_reset);
+
+  -- generate simple anonymization rules including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatesimplerules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw, salt);
+
+  -- generate concat anonymization rules
+  --
+  PERFORM custanon.gar_generic_generateconcatrules(sourcedbid, v_dstdbtech, anonrulesfdw);
+
+  -- generate custom anonymization functions including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatecustomrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- apply post-transformers and generate final rules
+  --
+  PERFORM custanon.gar_generic_generatefinalrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- Apply rules
+  --
+  PERFORM custanon.gar_generic_applyrules(sourcedbid, srcschema);
+
+  -- drop CSV FDW
+  --
+  PERFORM custanon.gar_generic_closecsvrules(sourcedbid, csvfile, anonrulesfdw);
+
+  -- anonymize a small part of the most complex table to compute approximative duration of full DB anonymization
+  --
+  PERFORM custanon.gar_generic_anonymizesample(sourcedbid, srcschema, v_maskrole);
+
+  -- disable all indexes, FKs, checks and set NOLOGGING on all tables
+  -- to be anonymized if mode is csvsplitinject or irdw
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- For PostgreSQL:
+    --
+    PERFORM custanon.logging(sourcedbid, '  Set NOLOGGING...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+
+    -- disable logging and set paralellism
+    --
+    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
+    LOOP
+      -- EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' NOLOGGING'')';
+    END LOOP;
+
+    RESET ROLE;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- check what are the tables without PK in case v_dstdbtech is same, csvsplitinject or irdw
+  -- and check what are the tables having a multi-columns PK
+  --
+  IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables without PK that cannot be statically anonymized...');
+    FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND (t0.anon_pk=false AND t0.anon_ui=false) AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid
+    LOOP
+      initstart := clock_timestamp();
+
+      PERFORM FROM (
+        SELECT CASE WHEN attfdwoptions IS NULL THEN '' ELSE   '(' || pg_catalog.array_to_string(ARRAY(SELECT pg_catalog.quote_ident(option_name) || ' ' || pg_catalog.quote_literal(option_value) FROM pg_catalog.pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions
+        FROM pg_catalog.pg_attribute a
+        WHERE a.attrelid = r1.oid AND a.attnum > 0 AND NOT a.attisdropped AND attfdwoptions IS NOT NULL
+      ) AS t0
+      WHERE t0.attfdwoptions LIKE '%key ''true''%';
+      IF FOUND THEN
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has a PK');
+      ELSE
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has no PK');
+        UPDATE custanon.counts SET pk=false WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- PERFORM custanon.logging(sourcedbid, '    looking for columns on which it could be possible to create a PK...');
+        -- i := 0;
+        -- EXECUTE 'SET ROLE ' || schemaowner;
+        -- FOR r2 IN SELECT col FROM custanon.find_unique_columns(srcschema, r1.relname) WHERE is_unique=true
+        -- LOOP
+        --   PERFORM custanon.logging(sourcedbid, '      ' || r2.col);
+        --   IF i=0 THEN
+        --     pkcol := r2.col;
+        --     i := 1;
+        --   END IF;
+        -- END LOOP;
+        -- RESET ROLE;
+
+        -- set key 'true' option if a column that can be used as a PK has been found
+        -- else add a new serial column to the source table with a PK on it
+        -- IF i<>0 THEN
+        --   PERFORM custanon.logging(sourcedbid, '      Found column ' || pkcol || ' that can be used as a PK');
+        --   IF v_srcdbtech='oracle' THEN
+        --     EXECUTE 'SET ROLE ' || schemaowner;
+        --     EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' ADD CONSTRAINT PRIMARY KEY(' || pkcol || ')'')';
+        --     RESET ROLE;
+        --   END IF;
+        --   EXECUTE 'ALTER FOREIGN TABLE ' || srcschema || '.' || r1.relname || ' ALTER COLUMN ' || pkcol || ' OPTIONS (key ''true'')';
+        --   UPDATE custanon.counts SET pk=true WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- ELSE
+        -- END IF;
+      END IF;
+    END LOOP;
+
+    -- Create a new identity column with a unique index in case a PK is existing
+    -- but composed of several columns
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables with multi-columns PK...');
+-- select t0.table_name, t0.index_name, string_agg(t1.column_name, ', ' order by t1.column_position) as cols FROM custanon.counts t00, samoracle.user_constraints t0, samoracle.user_ind_columns t1 WHERE t0.constraint_type='P' and t00.tbl=t0.table_name and t0.table_name=t1.table_name and t0.index_name=t1.index_name and t00.nb>0 and t00.dbid=21 group by t0.table_name, t0.index_name order by t0.table_name, t0.index_name;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- prepare destination tables for local destination
+  --
+  IF v_dstdbtech='local' THEN
+    PERFORM custanon.gar_generic_preparelocaltables(sourcedbid, srcschema, dstschema, schemaowner, v_maskrole);
+  END IF;
+
+  -- compute table parts if mode is csvsplitinject
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- configure the splitter_read table
+    PERFORM custanon.splitter_read(v_dstdbtech, v_projectname, sourcedbid);
+  END IF;
+
+  IF v_dstdbtech<>'pg_dump' THEN
+    -- anonymize all tables using X jobs
+    --
+    PERFORM custanon.gar_generic_createanonjobs(sourcedbid, v_dstdbtech, v_projectname, v_maskrole, v_maskschema);
+  END IF;
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.generate_anon_rules_mssql(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules_oracle(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules_oracle(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  i integer;
+  sourcedbid bigint;
+  sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
+  analyzecnt bigint;
+  initstart timestamp;
+  initduration interval;
+  r1 RECORD;
+  srcsrvparams RECORD;
+  lv_pkinfo RECORD;
+  v_srcdbtech TEXT := 'oracle';
+  salt TEXT;
+  sourcerolepwd TEXT;
+  sourcefdw TEXT;
+  anonrulesfdw TEXT;
+  srcschema TEXT;
+  dstschema TEXT;
+  schemaowner TEXT;
+
+BEGIN
+  -- The custanon.generate_anon_rules_oracle function is one the main Ninjanon functions.
+  -- It does several things to prepare the anonymization of an Oracle database:
+  --   * record the source database to be anonymized and take its ID
+  --   * create the roles and anonymizaton schema needed, including GRANTS
+  --   * configure security labels on functions outside of the anon extension scope
+  --     that you might use for anonymization purposes (and don't forget to modify
+  --     this function to include others)
+  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
+  --     database to be anonymized. Here: Oracle. Configure mapping users.
+  --     Import the foreign schema.
+  --   * run the Autodiscovery to create the CSV file of the anonymization rules
+  --     automatically if Autodiscovery mode is enabled by the user
+  --   * Create the FDW on the CSV file containing the anonymization rules and
+  --     interprete all the rules and configure the real anon extension rules
+  --     accordingly
+  --   * compute the complexity indicators for all tables to be anonymized:
+  --     this will set the order in which the SQL tables will have to be anonymized
+  --   * anonymize a small sample of the most complicated SQL table to compute
+  --     the time needed on this basis for all SQL tables to be anonymized
+  --   * check what are the SQL tables without Primary Key in order to create
+  --     a temporary one on each found SQL table. Also check if a column with
+  --     unique values would be existing to make it a temporary PK.
+  --   * prepare the things depending on the output mode selected for the results
+  --     of the anonymization and depending of the database engine used for the
+  --     source database to be anonymized (that can be disable all indexes,
+  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
+  --   * configure the parallel jobs depending of the output mode, that will be
+  --     in charge of the anonymization in parallel
+  --
+  srcschema := v_projectname || v_srcdbtech;
+  dstschema := v_projectname || v_dstdbtech;
+  schemaowner := v_projectname || 'adm';
+
+  PERFORM custanon.logging('Configuring source database...');
+  SELECT INTO srcsrvparams substring(f_srcserver, '^//(.*):') AS srcsrvname, substring(f_srcserver, '^//.*:([0-9]+)/') AS srcsrvport, substring(f_srcserver, '^//.*:[0-9]+/(.*)') AS srcsrvdb;
+  sourcedbid := (SELECT custanon.getdb(v_srcdbtech::custanon.dbengine, f_srcserver, f_srcschema, f_srcrole, f_srcpwdfile, f_datestyle));
+  sourcerolepwd := (SELECT custanon.pgp_sym_decrypt(sourcepwd, custanon.f_getjewel()) FROM custanon.dbsources WHERE id=sourcedbid);
+  sourcefdw := 'srcdb_' || sourcedbid;
+  anonrulesfdw := 'anonrules_' || sourcedbid;
+
+  -- update the counter of number of analysis
+  --
+  analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
+  INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
+
+  -- preparation steps: create dedicated schema, users, permissions...
+  --
+  PERFORM custanon.gar_generic_prepare(sourcedbid, srcschema, schemaowner);
+
+  -- configure Oracle FDW on source DB
   --
   PERFORM custanon.logging(sourcedbid, 'Creating extension oracle_fdw...');
   CREATE EXTENSION IF NOT EXISTS oracle_fdw;
@@ -1577,232 +2413,56 @@ BEGIN
   RESET ROLE;
 
   IF csvfile<>'create' THEN
-    -- configure file FDW
-    --TRUNCATE custanon.anonrules;
-    PERFORM custanon.logging(sourcedbid, 'Creating extension file_fdw...');
-    CREATE EXTENSION IF NOT EXISTS file_fdw;
-    PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || anonrulesfdw || '...');
-    EXECUTE 'CREATE SERVER IF NOT EXISTS ' || anonrulesfdw || ' FOREIGN DATA WRAPPER file_fdw';
-    PERFORM custanon.logging(sourcedbid, 'Creating foreign table ' || anonrulesfdw || ' using CSV file ' || csvfile);
-    EXECUTE 'CREATE FOREIGN TABLE IF NOT EXISTS custanon.' || anonrulesfdw || '(tbl text, col text, enabled text, anonfunc text, custom text, condition text, pretransformer text, transformer text) SERVER ' || anonrulesfdw || ' OPTIONS (filename ''' || csvfile || ''', format ''csv'', header ''true'', delimiter '';'')';
-
-    -- register the salt if configured
-    PERFORM custanon.logging(sourcedbid, 'Configuring salt for pseudonymization if existing...');
-    EXECUTE 'SELECT col FROM custanon.' || anonrulesfdw || ' WHERE tbl=''#SALT#''' INTO salt;
-    IF salt IS NOT NULL THEN
-      PERFORM custanon.logging(sourcedbid, '  Salt value: ' || salt);
-      salt := '''''''''' || salt || '''''''''';
-    ELSE
-      PERFORM custanon.logging(sourcedbid, '  Salt value: NULL');
-      salt := 'NULL';
-    END IF;
-
-    -- create updatable views if needed
-    PERFORM custanon.logging(sourcedbid, 'Creating updatable views...');
-    FOR r1 IN EXECUTE format('SELECT tbl, right(col, length(col)-4) AS uvquery, custom AS updatequery FROM custanon.%I WHERE left(col, 4)=''#UV#''', anonrulesfdw)
-    LOOP
-      PERFORM custanon.logging(sourcedbid, '  Creating updatable view: ' || srcschema || '.' || r1.tbl);
-      EXECUTE 'DROP VIEW IF EXISTS ' || srcschema || '.' || r1.tbl || ' CASCADE';
-      EXECUTE 'CREATE VIEW ' || srcschema || '.' || r1.tbl || ' AS ' || r1.uvquery;
-      IF r1.updatequery IS NOT NULL THEN
-        EXECUTE 'CREATE OR REPLACE RULE ' || r1.tbl || '_urule AS ON UPDATE TO ' || srcschema || '.' || r1.tbl || ' DO INSTEAD ' || r1.updatequery;
-      END IF;
-    END LOOP;
+    -- Read CSV file describing anonymization rules
+    --
+    PERFORM custanon.gar_generic_readcsvrules(sourcedbid, srcschema, csvfile, anonrulesfdw, salt);
   END IF;
 
   -- AUTODISCOVERY
-  -- If autorules mode is requested, determine what is the best anonymization
-  -- method to be used
+  -- If autorules mode is requested, determine what are the best anonymization
+  -- methods to be used
+  --
   IF v_dstdbtech='autorules' THEN
     PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
 
-    -- EXIT
     RETURN '';
   END IF;
 
   -- compute complexity indices
-  PERFORM custanon.logging(sourcedbid, 'Counting number of tuples for tables to be anonymized...');
-  EXECUTE 'GRANT ALL ON TABLE custanon.counts TO ' || schemaowner;
-  IF counters_reset=true THEN
-    PERFORM custanon.logging(sourcedbid, '  Reset counters...');
-    DELETE FROM custanon.counts WHERE dbid=sourcedbid;
-  END IF;
-  FOR r1 IN EXECUTE format('SELECT DISTINCT t0.tbl FROM custanon.%I t0 LEFT JOIN custanon.counts t1 ON (t0.tbl=t1.tbl AND t1.dbid=%s) WHERE t0.tbl<>''#SALT#'' AND left(t0.col, 4)<>''#UV#'' AND t0.enabled<>''%s'' AND t1.tbl IS NULL', anonrulesfdw, sourcedbid, 'false')
-  LOOP
-    PERFORM custanon.logging(sourcedbid, '  Counting for ' || r1.tbl || '...');
-    initstart := clock_timestamp();
-    EXECUTE 'SET ROLE ' || schemaowner;
-    -- when NOT using DBMS_STATS package in the Oracle DB:
-    -- EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', count(*) FROM ' || srcschema || '.' || r1.tbl || ';';
-    -- when using DBMS_STATS package in the Oracle DB:
-    EXECUTE 'INSERT INTO custanon.counts(dbid, tbl, nb) SELECT ' || sourcedbid || ', ''' || r1.tbl || ''', num_rows FROM ' || srcschema || '.user_tables WHERE table_name=''' || r1.tbl || ''';';
-    RESET ROLE;
-    initduration := clock_timestamp()-initstart;
-    UPDATE custanon.counts SET init_startedat=initstart, init_time=initduration WHERE dbid=sourcedbid AND tbl=r1.tbl;
-  END LOOP;
-
-  PERFORM custanon.logging(sourcedbid, 'Computing anonymization complexity...');
-  DELETE FROM custanon.complexity WHERE dbid=sourcedbid;
-  EXECUTE 'INSERT INTO custanon.complexity(dbid, tbl, col, nbtuples, complexity) SELECT ' || sourcedbid || ', t0.tbl, t0.col, t1.nb, CASE WHEN t0.anonfunc ILIKE ''null'' THEN 1 WHEN t0.anonfunc ILIKE ''anon\.constant%'' THEN 1 WHEN t0.anonfunc ILIKE ''anon\.random_int_between%'' THEN 2 WHEN t0.anonfunc ILIKE ''%\.fake%'' THEN 3 WHEN t0.anonfunc ILIKE ''custom'' THEN 5 WHEN t0.anonfunc ILIKE ''%\.pseudo%'' THEN 10 WHEN t0.anonfunc ILIKE ''%concat%'' THEN 20 WHEN t0.anonfunc ILIKE ''condition'' THEN 20 ELSE 0 END FROM custanon.' || anonrulesfdw || ' t0, custanon.counts t1 WHERE t0.tbl<>''#SALT#'' AND left(t0.col, 4)<>''#UV#'' AND t0.enabled<>''false'' AND t0.tbl=t1.tbl AND t1.dbid=' || sourcedbid;
-  WITH t0 AS (SELECT c.tbl, sum(c.nbtuples*c.complexity) AS indix FROM custanon.complexity AS c WHERE c.dbid=sourcedbid GROUP BY c.tbl) UPDATE custanon.counts AS t1 SET complexity=t0.indix FROM t0 WHERE t1.tbl=t0.tbl AND t1.dbid=sourcedbid;
+  --
+  PERFORM custanon.gar_generic_complexityindices(sourcedbid, v_srcdbtech, srcschema, schemaowner, anonrulesfdw, counters_reset);
 
   -- generate simple anonymization rules including pre-transformers
-  PERFORM custanon.logging(sourcedbid, 'Generating simple anonymization functions including pre-transformers...');
-  proc := format($internal$
-    UPDATE custanon.complexity AS t1 SET anon_func=CASE
-        WHEN anonfunc ILIKE 'null' THEN
-                anonfunc
-        WHEN anonfunc ILIKE 'anon\.constant%%' THEN
-                '''''' || pg_catalog.substring(anonfunc, 'anon.constant\(\''(.*)\''\)') || ''''''
-        WHEN anonfunc ILIKE 'anon\.random_int_between%%' THEN
-                anonfunc
-        WHEN anonfunc ILIKE '%%\.fake%%' THEN
-                anonfunc || '()'
-        WHEN anonfunc ILIKE '%%\.pseudo%%' THEN
-                CASE WHEN t0.pretransformer IS NULL THEN
-                        anonfunc || '(' || '%s' || '.' || t1.tbl || '.' || t1.col || ', ' || '%s' || ')'
-                ELSE
-                        anonfunc || '(' || replace(t0.pretransformer, '#F#', '%s' || '.' || t1.tbl || '.' || t1.col) || ', ' || '%s' || ')'
-                END
-        WHEN anonfunc ILIKE 'condition' THEN
-                pg_catalog.replace(t0.condition, 'col', '%s' || '.' || t1.tbl || '.' || t1.col)
-        END
-    FROM custanon.%I t0 WHERE ((t0.enabled='true' AND '%s'='same') OR (t0.enabled<>'false' AND '%s'<>'same')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t0.anonfunc NOT ILIKE 'pg_catalog\.concat%%' AND t1.dbid=%s;
-  $internal$, srcschema, salt, srcschema, salt, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid);
-  EXECUTE proc;
+  --
+  PERFORM custanon.gar_generic_generatesimplerules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw, salt);
 
   -- generate concat anonymization rules
-  PERFORM custanon.logging(sourcedbid, 'Generating concat anonymization functions...');
-  proc := format($internal$
-    WITH sub1 AS (
-      WITH backcols AS (
-        SELECT t1.tbl, t1.col, pg_catalog.substring(t1.anonfunc, '(.*)\(') AS op, btrim(pg_catalog.string_to_table(pg_catalog.substring(t1.anonfunc, '\((.*)\)'), ',')) AS backcol
-        FROM custanon.complexity t0, custanon.%I t1
-        WHERE t0.tbl=t1.tbl and t0.col=t1.col AND ((t1.enabled='true' AND '%s'='same') OR (t1.enabled<>'false' AND '%s'<>'same')) AND t1.anonfunc ILIKE 'pg_catalog\.concat%%' AND t0.dbid=%s
-      )
-      SELECT backcols.tbl, backcols.col, backcols.op || '(' || pg_catalog.string_agg(t1.anon_func, ', ') || ')' AS agg_anon_func
-      FROM backcols, custanon.complexity t1
-      WHERE t1.tbl=backcols.tbl AND t1.col=backcols.backcol AND t1.dbid=%s
-      GROUP BY backcols.tbl, backcols.col, backcols.op
-    )
-    UPDATE custanon.complexity AS t100 SET anon_func=CASE
-      WHEN sub1.agg_anon_func ILIKE 'pg_catalog\.concat%%' THEN
-        pg_catalog.replace(sub1.agg_anon_func, 'pg_catalog.concat(', 'pg_catalog.concat_ws('''' '''', ')
-      END
-    FROM sub1
-    WHERE t100.tbl=sub1.tbl AND t100.col=sub1.col AND t100.dbid=%s;
-  $internal$, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid, sourcedbid, sourcedbid);
-  EXECUTE proc;
+  --
+  PERFORM custanon.gar_generic_generateconcatrules(sourcedbid, v_dstdbtech, anonrulesfdw);
 
   -- generate custom anonymization functions including pre-transformers
-  PERFORM custanon.logging(sourcedbid, 'Generating custom anonymization functions including pre-transformers...');
-  FOR r1 IN EXECUTE format('SELECT DISTINCT md5(t0.custom) AS md5sum, t0.custom FROM custanon.%I t0 WHERE t0.anonfunc ILIKE ''custom'' AND t0.custom IS NOT NULL AND ((t0.enabled=''true'' AND ''%s''=''same'') OR (t0.enabled<>''false'' AND ''%s''<>''same''))', anonrulesfdw, v_dstdbtech, v_dstdbtech)
-  LOOP
-    PERFORM md5sum FROM custanon.customs WHERE md5sum=r1.md5sum;
-    IF NOT FOUND THEN
-      INSERT INTO custanon.customs(md5sum, code) VALUES (r1.md5sum, r1.custom) RETURNING id INTO customid;
-      PERFORM custanon.logging(sourcedbid, '  Creating new SQL function custom_' || customid);
---      BEGIN
-        proc := format($internal$
-          CREATE OR REPLACE FUNCTION custanon.custom_%s(col text)
-            RETURNS text
-            LANGUAGE sql
-            STABLE PARALLEL SAFE SECURITY DEFINER
-            SET search_path TO 'pg_catalog', 'pg_temp'
-          AS $function$
-            %s
-          $function$;
-        $internal$, customid, r1.custom);
-        EXECUTE proc;
-        EXECUTE 'SECURITY LABEL FOR anon ON FUNCTION custanon.custom_' || customid || ' IS ''TRUSTED''';
-        UPDATE custanon.customs SET created=true WHERE id=customid;
---      EXCEPTION WHEN OTHERS THEN
---        RAISE NOTICE '    An exception occured when trying to create new SQL function custom_%. Aborting.', customid;
---        RETURN 'An exception occured when trying to create new SQL function';
---      END;
-    END IF;
-  END LOOP;
-  FOR r1 IN EXECUTE format('SELECT t0.tbl, t0.col, CASE WHEN t0.pretransformer IS NULL THEN ''custanon.custom_'' || t1.id || ''('' || ''%s'' || ''.'' || t0.tbl || ''.'' || t0.col || '')'' ELSE ''custanon.custom_'' || t1.id || ''('' || replace(t0.pretransformer, ''#F#'', ''%s'' || ''.'' || t0.tbl || ''.'' || t0.col) || '')'' END AS custfunc FROM custanon.%I t0, custanon.customs t1 WHERE md5(t0.custom)=t1.md5sum AND t1.created=true AND t0.anonfunc ILIKE ''custom'' AND t0.custom IS NOT NULL AND ((t0.enabled=''true'' AND ''%s''=''same'') OR (t0.enabled<>''false'' AND ''%s''<>''same''))', srcschema, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech)
-  LOOP
-    UPDATE custanon.complexity AS t100 SET anon_func=r1.custfunc WHERE t100.tbl=r1.tbl AND t100.col=r1.col AND t100.dbid=sourcedbid;
-  END LOOP;
+  --
+  PERFORM custanon.gar_generic_generatecustomrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
 
-  -- apply post-transformers
-  PERFORM custanon.logging(sourcedbid, 'Applying post-transformers...');
-  EXECUTE 'UPDATE custanon.complexity AS t1 SET anon_func=replace(t0.transformer, ''#F#'', anon_func) FROM custanon.' || anonrulesfdw || ' t0 WHERE ((t0.enabled=''true'' AND ''' || v_dstdbtech || '''=''same'') OR (t0.enabled<>''false'' AND ''' || v_dstdbtech || '''<>''same'')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t1.anon_func IS NOT NULL AND t0.transformer IS NOT NULL AND t1.dbid=' || sourcedbid;
-
-  -- generate final rules
-  PERFORM custanon.logging(sourcedbid, 'Generating anonymization rules...');
-  proc := format($internal$
-    UPDATE custanon.complexity AS t1 SET anon_rule='SECURITY LABEL FOR anon ON COLUMN ' || '%s' || '.' || t1.tbl || '.' || t1.col || ' IS ''MASKED WITH ' ||
-        CASE
-        WHEN t0.anonfunc ILIKE 'null' THEN
-                'VALUE' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE 'anon\.constant%%' THEN
-                'VALUE' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE 'anon\.random_int_between%%' THEN
-                'FUNCTION' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE '%%\.fake%%' THEN
-                'FUNCTION' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE '%%\.pseudo%%' THEN
-                'FUNCTION' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE 'pg_catalog\.concat%%' THEN
-                'FUNCTION' || ' ' || anon_func
-        WHEN t0.anonfunc ILIKE 'custom' THEN
-                'FUNCTION' || ' ' || anon_func
-        ELSE
-                'FUNCTION' || ' ' || anon_func
-        END || ''';'
-    FROM custanon.%I t0 WHERE ((t0.enabled='true' AND '%s'='same') OR (t0.enabled<>'false' AND '%s'<>'same')) AND t1.tbl=t0.tbl AND t1.col=t0.col AND t1.dbid=%s;
-  $internal$, srcschema, anonrulesfdw, v_dstdbtech, v_dstdbtech, sourcedbid);
-  EXECUTE proc;
-
-  noanon := (SELECT count(*) AS nb FROM custanon.counts WHERE complexity=0 AND dbid=sourcedbid);
-  withanon := (SELECT count(*) AS nb FROM custanon.counts WHERE complexity<>0 AND dbid=sourcedbid);
-  PERFORM custanon.logging(sourcedbid, 'Number of tables having 0 tuples requiring no anonymization: ' || noanon);
-  PERFORM custanon.logging(sourcedbid, 'Number of tables requiring anonymization: ' || withanon);
+  -- apply post-transformers and generate final rules
+  --
+  PERFORM custanon.gar_generic_generatefinalrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
 
   -- Apply rules
-  PERFORM custanon.logging(sourcedbid, 'Applying anonymization rules...');
-  PERFORM custanon.logging(sourcedbid, '  Remove existing anonymization rules...');
-  FOR r1 IN SELECT relnamespace, relname, attname FROM anon.pg_masking_rules WHERE relnamespace=srcschema::regnamespace
-  LOOP
-    EXECUTE format('SECURITY LABEL FOR anon ON COLUMN %I.%I.%I IS NULL', r1.relnamespace, r1.relname, r1.attname);
-  END LOOP;
---  PERFORM anon.remove_masks_for_all_columns(); -- This one is to remove everything, which we don't want to not impact other existing source schemas
-  PERFORM custanon.logging(sourcedbid, '  Create new anonymization rules...');
-  FOR r1 IN SELECT t0.anon_rule FROM custanon.complexity t0 WHERE t0.anon_rule IS NOT NULL AND t0.dbid=sourcedbid
-  LOOP
-    EXECUTE r1.anon_rule;
-  END LOOP;
+  --
+  PERFORM custanon.gar_generic_applyrules(sourcedbid, srcschema);
 
   -- drop CSV FDW
-  PERFORM custanon.logging(sourcedbid, 'Closing CSV file ' || csvfile || '...');
-  EXECUTE 'DROP FOREIGN TABLE custanon.' || anonrulesfdw;
-  EXECUTE 'DROP SERVER ' || anonrulesfdw;
+  --
+  PERFORM custanon.gar_generic_closecsvrules(sourcedbid, csvfile, anonrulesfdw);
 
   -- anonymize a small part of the most complex table to compute approximative duration of full DB anonymization
-  PERFORM custanon.logging(sourcedbid, 'Anonymize a ' || maxsample || ' tuples sample of the most time consuming table for generating statistics...');
-  EXECUTE 'GRANT pg_write_server_files TO ' || v_maskrole;
-  SELECT INTO sample srcschema || '.' || tbl AS tbl, nb, complexity FROM custanon.counts WHERE dbid=sourcedbid ORDER BY complexity DESC LIMIT 1;
-  PERFORM custanon.logging(sourcedbid, '  Sampling ' || sample.tbl || ' table...');
-  anonstart := clock_timestamp();
-  EXECUTE 'SET ROLE ' || v_maskrole;
-  EXECUTE 'COPY (SELECT * FROM ' || sample.tbl || ' LIMIT ' || maxsample || ') TO ''/var/tmp/test.csv'' WITH (FORMAT csv, HEADER, DELIMITER '';'')';
-  RESET ROLE;
-  anonend := clock_timestamp();
-  anonduration := anonend-anonstart;
-  PERFORM custanon.logging(sourcedbid, '  Sample anonymization made in ' || anonduration || '.');
-
-  PERFORM custanon.logging(sourcedbid, 'Computing projected anonymization time for all tables...');
-  sampleanonduration := anonduration*(sample.nb/maxsample);
-  UPDATE custanon.counts SET projected_anon_time=sampleanonduration*complexity/sample.complexity WHERE dbid=sourcedbid;
-
-  fullanonduration := (SELECT sum(projected_anon_time) FROM custanon.counts WHERE enabled=true AND dbid=sourcedbid);
-  PERFORM custanon.logging(sourcedbid, 'Expected (estimated) duration for full anonymization is around ' || fullanonduration);
+  --
+  PERFORM custanon.gar_generic_anonymizesample(sourcedbid, srcschema, v_maskrole);
 
   -- disable all indexes, FKs, checks and set NOLOGGING on all tables
   -- to be anonymized if mode is csvinject, csvsplitinject or bininject
+  --
   IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
     -- For ORACLE:
     --
@@ -1810,6 +2470,7 @@ BEGIN
     EXECUTE 'SET ROLE ' || schemaowner;
 
     -- disable logging and set paralellism
+    --
     FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
     LOOP
       EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' NOLOGGING'')';
@@ -1819,8 +2480,9 @@ BEGIN
     RESET ROLE;
   END IF;
 
-  -- check what are the tables without PK in case v_dstdbtech is same or csvsplitinject
+  -- check what are the tables without PK in case v_dstdbtech is same, csvsplitinject or irdw
   -- and check what are the tables having a multi-columns PK
+  --
   IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
     PERFORM custanon.logging(sourcedbid, 'Checking what are the tables without PK that cannot be statically anonymized...');
     FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND (t0.anon_pk=false AND t0.anon_ui=false) AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid
@@ -1921,22 +2583,13 @@ BEGIN
   END IF;
 
   -- prepare destination tables for local destination
+  --
   IF v_dstdbtech='local' THEN
-    PERFORM custanon.logging(sourcedbid, 'Creating tables for local destination if needed...');
-    EXECUTE 'CREATE SCHEMA IF NOT EXISTS ' || dstschema || ' AUTHORIZATION ' || schemaowner;
-    EXECUTE 'GRANT USAGE ON SCHEMA ' || dstschema || ' TO ' || v_maskrole;
-    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
-    LOOP
-      PERFORM custanon.logging(sourcedbid, '  Create or truncate table ' || dstschema || '.' || r1.tbl);
-      EXECUTE 'SET ROLE ' || schemaowner;
-      EXECUTE 'CREATE TABLE IF NOT EXISTS ' || dstschema || '.' || r1.tbl || ' (LIKE ' || srcschema || '.' || r1.tbl || ' INCLUDING CONSTRAINTS)';
-      EXECUTE 'GRANT SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON ' || dstschema || '.' || r1.tbl || ' TO ' || v_maskrole;
-      EXECUTE 'TRUNCATE ' || dstschema || '.' || r1.tbl;
-      RESET ROLE;
-    END LOOP;
+    PERFORM custanon.gar_generic_preparelocaltables(sourcedbid, srcschema, dstschema, schemaowner, v_maskrole);
   END IF;
 
   -- compute table parts if mode is csvsplitinject
+  --
   IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
     -- configure the splitter_read table
     PERFORM custanon.splitter_read(v_dstdbtech, v_projectname, sourcedbid);
@@ -1944,22 +2597,270 @@ BEGIN
 
   IF v_dstdbtech<>'pg_dump' THEN
     -- anonymize all tables using X jobs
-    PERFORM custanon.logging(sourcedbid, 'Creating ' || nbjobs || ' anonymization jobs to anonymize DB source ID ' || sourcedbid || '...');
-    UPDATE custanon.counts SET anon_time=NULL, csvinject_time=NULL, rebuild_time=NULL, startedat=NULL, endedat=NULL, pid=NULL WHERE dbid=sourcedbid;
-    UPDATE custanon.counts SET tobeprocessed=true WHERE enabled=true AND nb>0 AND dbid=sourcedbid;
-    DELETE FROM custanon.parallel t0 WHERE t0.dbid=sourcedbid AND t0.projectname=v_projectname AND t0.maskrole=v_maskrole AND t0.maskschema=v_maskschema;
-
-    FOR i IN 1..nbjobs LOOP
-      INSERT INTO custanon.parallel(state, dbid, projectname, maskrole, maskschema, dstdbtech) VALUES ('wait', sourcedbid, v_projectname, v_maskrole, v_maskschema, v_dstdbtech);
-    END LOOP;
+    --
+    PERFORM custanon.gar_generic_createanonjobs(sourcedbid, v_dstdbtech, v_projectname, v_maskrole, v_maskschema);
   END IF;
 
   RETURN '';
 END;
-$_$;
+$$;
 
 
 ALTER FUNCTION custanon.generate_anon_rules_oracle(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
+
+--
+-- Name: generate_anon_rules_pgsql(text, text, text, text, text, text, text, text, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.generate_anon_rules_pgsql(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text DEFAULT 'anon'::text, counters_reset boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  i integer;
+  sourcedbid bigint;
+  sampling integer := (SELECT custanon.getconfig('sampling', '1000')::integer);
+  analyzecnt bigint;
+  initstart timestamp;
+  initduration interval;
+  r1 RECORD;
+  srcsrvparams RECORD;
+  lv_pkinfo RECORD;
+  v_srcdbtech TEXT := 'pgsql';
+  salt TEXT;
+  sourcerolepwd TEXT;
+  sourcefdw TEXT;
+  anonrulesfdw TEXT;
+  srcschema TEXT;
+  dstschema TEXT;
+  schemaowner TEXT;
+
+BEGIN
+  -- The custanon.generate_anon_rules_oracle function is one the main Ninjanon functions.
+  -- It does several things to prepare the anonymization of a PostgreSQL database:
+  --   * record the source database to be anonymized and take its ID
+  --   * create the roles and anonymizaton schema needed, including GRANTS
+  --   * configure security labels on functions outside of the anon extension scope
+  --     that you might use for anonymization purposes (and don't forget to modify
+  --     this function to include others)
+  --   * configure the right PostgreSQL foreign data wrapper (FDW) on the source
+  --     database to be anonymized. Here: PostgreSQL. Configure mapping users.
+  --     Import the foreign schema.
+  --   * run the Autodiscovery to create the CSV file of the anonymization rules
+  --     automatically if Autodiscovery mode is enabled by the user
+  --   * Create the FDW on the CSV file containing the anonymization rules and
+  --     interprete all the rules and configure the real anon extension rules
+  --     accordingly
+  --   * compute the complexity indicators for all tables to be anonymized:
+  --     this will set the order in which the SQL tables will have to be anonymized
+  --   * anonymize a small sample of the most complicated SQL table to compute
+  --     the time needed on this basis for all SQL tables to be anonymized
+  --   * check what are the SQL tables without Primary Key in order to create
+  --     a temporary one on each found SQL table. Also check if a column with
+  --     unique values would be existing to make it a temporary PK.
+  --   * prepare the things depending on the output mode selected for the results
+  --     of the anonymization and depending of the database engine used for the
+  --     source database to be anonymized (that can be disable all indexes,
+  --     disable all foreign keys, disable triggers, set NOLOGGING, ...)
+  --   * configure the parallel jobs depending of the output mode, that will be
+  --     in charge of the anonymization in parallel
+  --
+  srcschema := v_projectname || v_srcdbtech;
+  dstschema := v_projectname || v_dstdbtech;
+  schemaowner := v_projectname || 'adm';
+
+  PERFORM custanon.logging('Configuring source database...');
+  SELECT INTO srcsrvparams substring(f_srcserver, '^//(.*):') AS srcsrvname, substring(f_srcserver, '^//.*:([0-9]+)/') AS srcsrvport, substring(f_srcserver, '^//.*:[0-9]+/(.*)') AS srcsrvdb;
+  sourcedbid := (SELECT custanon.getdb(v_srcdbtech::custanon.dbengine, f_srcserver, f_srcschema, f_srcrole, f_srcpwdfile, f_datestyle));
+  sourcerolepwd := (SELECT custanon.pgp_sym_decrypt(sourcepwd, custanon.f_getjewel()) FROM custanon.dbsources WHERE id=sourcedbid);
+  sourcefdw := 'srcdb_' || sourcedbid;
+  anonrulesfdw := 'anonrules_' || sourcedbid;
+
+  -- update the counter of number of analysis
+  --
+  analyzecnt := (SELECT analyzerunid+1 FROM custanon.runs WHERE dbid=sourcedbid ORDER BY analyzerunid DESC LIMIT 1);
+  INSERT INTO custanon.runs(dbid, analyzerunid) VALUES (sourcedbid, analyzecnt);
+
+  -- preparation steps: create dedicated schema, users, permissions...
+  --
+  PERFORM custanon.gar_generic_prepare(sourcedbid, srcschema, schemaowner);
+
+  -- configure PostgreSQL FDW on source DB
+  --
+  PERFORM custanon.logging(sourcedbid, 'Creating extension postgres_fdw...');
+  CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+
+  PERFORM custanon.logging(sourcedbid, 'Creating FDW server ' || sourcefdw || '...');
+  EXECUTE 'CREATE SERVER IF NOT EXISTS ' || sourcefdw || ' FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host ''' || srcsrvparams.srcsrvname || ''', port ''' || srcsrvparams.srcsrvport || ''', dbname ''' || srcsrvparams.srcsrvdb || ''')';
+
+  PERFORM custanon.logging(sourcedbid, 'Configuring role access and permissions...');
+  EXECUTE 'GRANT USAGE ON FOREIGN SERVER ' || sourcefdw || ' TO ' || schemaowner;
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || schemaowner || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "user" ''' || f_srcrole || ''')';
+  EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR ' || v_maskrole || ' SERVER ' || sourcefdw || ' OPTIONS (password ''' || sourcerolepwd || ''', "user" ''' || f_srcrole || ''')';
+  PERFORM t1.relname FROM pg_catalog.pg_foreign_table t0 INNER JOIN pg_catalog.pg_class t1 ON t1.oid = t0.ftrelid INNER JOIN pg_catalog.pg_namespace t2 ON t2.oid = t1.relnamespace INNER JOIN pg_catalog.pg_foreign_server t3 ON t3.oid = t0.ftserver WHERE t2.nspname=srcschema COLLATE pg_catalog.default LIMIT 1;
+  IF NOT FOUND THEN
+    PERFORM custanon.logging(sourcedbid, 'Importing Foreign schema...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+    EXECUTE 'IMPORT FOREIGN SCHEMA "' || f_srcschema || '" FROM SERVER ' || sourcefdw || ' INTO ' || srcschema;
+    RESET ROLE;
+  END IF;
+
+  IF csvfile<>'create' THEN
+    -- Read CSV file describing anonymization rules
+    --
+    PERFORM custanon.gar_generic_readcsvrules(sourcedbid, srcschema, csvfile, anonrulesfdw, salt);
+  END IF;
+
+  -- AUTODISCOVERY
+  -- If autorules mode is requested, determine what are the best anonymization
+  -- methods to be used
+  --
+  IF v_dstdbtech='autorules' THEN
+    PERFORM custanon.autodiscovery(analyzecnt, sourcedbid, v_srcdbtech, v_projectname, csvfile);
+
+    -- EXIT
+    RETURN '';
+  END IF;
+
+  -- compute complexity indices
+  --
+  PERFORM custanon.gar_generic_complexityindices(sourcedbid, v_srcdbtech, srcschema, schemaowner, anonrulesfdw, counters_reset);
+
+  -- generate simple anonymization rules including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatesimplerules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw, salt);
+
+  -- generate concat anonymization rules
+  --
+  PERFORM custanon.gar_generic_generateconcatrules(sourcedbid, v_dstdbtech, anonrulesfdw);
+
+  -- generate custom anonymization functions including pre-transformers
+  --
+  PERFORM custanon.gar_generic_generatecustomrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- apply post-transformers and generate final rules
+  --
+  PERFORM custanon.gar_generic_generatefinalrules(sourcedbid, v_dstdbtech, srcschema, anonrulesfdw);
+
+  -- Apply rules
+  --
+  PERFORM custanon.gar_generic_applyrules(sourcedbid, srcschema);
+
+  -- drop CSV FDW
+  --
+  PERFORM custanon.gar_generic_closecsvrules(sourcedbid, csvfile, anonrulesfdw);
+
+  -- anonymize a small part of the most complex table to compute approximative duration of full DB anonymization
+  --
+  PERFORM custanon.gar_generic_anonymizesample(sourcedbid, srcschema, v_maskrole);
+
+  -- disable all indexes, FKs, checks and set NOLOGGING on all tables
+  -- to be anonymized if mode is csvsplitinject or irdw
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- For PostgreSQL:
+    --
+    PERFORM custanon.logging(sourcedbid, '  Set NOLOGGING...');
+    EXECUTE 'SET ROLE ' || schemaowner;
+
+    -- disable logging and set paralellism
+    --
+    FOR r1 IN SELECT tbl FROM custanon.counts WHERE dbid=sourcedbid
+    LOOP
+      -- EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' NOLOGGING'')';
+    END LOOP;
+
+    RESET ROLE;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- check what are the tables without PK in case v_dstdbtech is same, csvsplitinject or irdw
+  -- and check what are the tables having a multi-columns PK
+  --
+  IF v_dstdbtech='same' OR v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables without PK that cannot be statically anonymized...');
+    FOR r1 IN SELECT c.oid, c.relname, t0.tbl FROM custanon.counts t0, pg_catalog.pg_class c LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t0.nb>0 AND (t0.anon_pk=false AND t0.anon_ui=false) AND n.nspname=srcschema AND c.relname ILIKE t0.tbl COLLATE pg_catalog.default AND t0.dbid=sourcedbid
+    LOOP
+      initstart := clock_timestamp();
+
+      PERFORM FROM (
+        SELECT CASE WHEN attfdwoptions IS NULL THEN '' ELSE   '(' || pg_catalog.array_to_string(ARRAY(SELECT pg_catalog.quote_ident(option_name) || ' ' || pg_catalog.quote_literal(option_value) FROM pg_catalog.pg_options_to_table(attfdwoptions)), ', ') || ')' END AS attfdwoptions
+        FROM pg_catalog.pg_attribute a
+        WHERE a.attrelid = r1.oid AND a.attnum > 0 AND NOT a.attisdropped AND attfdwoptions IS NOT NULL
+      ) AS t0
+      WHERE t0.attfdwoptions LIKE '%key ''true''%';
+      IF FOUND THEN
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has a PK');
+      ELSE
+        PERFORM custanon.logging(sourcedbid, '  ' || r1.relname || ' has no PK');
+        UPDATE custanon.counts SET pk=false WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- PERFORM custanon.logging(sourcedbid, '    looking for columns on which it could be possible to create a PK...');
+        -- i := 0;
+        -- EXECUTE 'SET ROLE ' || schemaowner;
+        -- FOR r2 IN SELECT col FROM custanon.find_unique_columns(srcschema, r1.relname) WHERE is_unique=true
+        -- LOOP
+        --   PERFORM custanon.logging(sourcedbid, '      ' || r2.col);
+        --   IF i=0 THEN
+        --     pkcol := r2.col;
+        --     i := 1;
+        --   END IF;
+        -- END LOOP;
+        -- RESET ROLE;
+
+        -- set key 'true' option if a column that can be used as a PK has been found
+        -- else add a new serial column to the source table with a PK on it
+        -- IF i<>0 THEN
+        --   PERFORM custanon.logging(sourcedbid, '      Found column ' || pkcol || ' that can be used as a PK');
+        --   IF v_srcdbtech='oracle' THEN
+        --     EXECUTE 'SET ROLE ' || schemaowner;
+        --     EXECUTE 'SELECT ' || srcschema || '.oracle_execute(''' || sourcefdw ||''', ''ALTER TABLE ' || f_srcschema || '.' || r1.tbl || ' ADD CONSTRAINT PRIMARY KEY(' || pkcol || ')'')';
+        --     RESET ROLE;
+        --   END IF;
+        --   EXECUTE 'ALTER FOREIGN TABLE ' || srcschema || '.' || r1.relname || ' ALTER COLUMN ' || pkcol || ' OPTIONS (key ''true'')';
+        --   UPDATE custanon.counts SET pk=true WHERE tbl ILIKE r1.relname AND dbid=sourcedbid;
+        -- ELSE
+        -- END IF;
+      END IF;
+    END LOOP;
+
+    -- Create a new identity column with a unique index in case a PK is existing
+    -- but composed of several columns
+    PERFORM custanon.logging(sourcedbid, 'Checking what are the tables with multi-columns PK...');
+-- select t0.table_name, t0.index_name, string_agg(t1.column_name, ', ' order by t1.column_position) as cols FROM custanon.counts t00, samoracle.user_constraints t0, samoracle.user_ind_columns t1 WHERE t0.constraint_type='P' and t00.tbl=t0.table_name and t0.table_name=t1.table_name and t0.index_name=t1.index_name and t00.nb>0 and t00.dbid=21 group by t0.table_name, t0.index_name order by t0.table_name, t0.index_name;
+  END IF;
+
+-- ####################
+-- ####################
+-- ####################
+
+  -- prepare destination tables for local destination
+  --
+  IF v_dstdbtech='local' THEN
+    PERFORM custanon.gar_generic_preparelocaltables(sourcedbid, srcschema, dstschema, schemaowner, v_maskrole);
+  END IF;
+
+  -- compute table parts if mode is csvsplitinject
+  --
+  IF v_dstdbtech='csvsplitinject' OR v_dstdbtech='irdw' THEN
+    -- configure the splitter_read table
+    PERFORM custanon.splitter_read(v_dstdbtech, v_projectname, sourcedbid);
+  END IF;
+
+  IF v_dstdbtech<>'pg_dump' THEN
+    -- anonymize all tables using X jobs
+    --
+    PERFORM custanon.gar_generic_createanonjobs(sourcedbid, v_dstdbtech, v_projectname, v_maskrole, v_maskschema);
+  END IF;
+
+  RETURN '';
+END;
+$$;
+
+
+ALTER FUNCTION custanon.generate_anon_rules_pgsql(csvfile text, f_srcserver text, f_srcrole text, f_srcpwdfile text, f_srcschema text, f_datestyle text, v_dstdbtech text, v_projectname text, v_maskrole text, v_maskschema text, counters_reset boolean) OWNER TO ninjanon;
 
 --
 -- Name: generate_nom(text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
@@ -2153,7 +3054,7 @@ BEGIN
   --   * update some parameters related to a source database if it's existing
   --     and return its ID
   --   * initialize the counter of Ninjanon runs for this source database
-  -- 
+  --
   PERFORM custanon.logging('Looking for source database...');
   SELECT INTO r id, datestyle<>v_datestyle AS update_datestyle, sourcerole<>v_role AS update_role FROM custanon.dbsources WHERE dbtech=v_dbtech AND sourceserver=v_server AND sourceschema=v_schema;
   IF NOT FOUND THEN
@@ -2189,12 +3090,12 @@ BEGIN
   -- to work, like: pgcrypto and anon.
   -- Then after the anon extension is created, its own init function will
   -- be called.
-  -- Finally, the last names dictionnary inside Ninjanon (so inside the 
+  -- Finally, the last names dictionnary inside Ninjanon (so inside the
   -- custanon schema) is copied into the last_name SQL table, which is the
   -- table used as dictionnary by the anon extension.
   -- Then the configuration parameter 'initialized' is set to true in the
   -- config SQL table
-  -- 
+  --
   CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA custanon;
 
   -- Check if anon extension is installed and install it if not
@@ -2299,7 +3200,7 @@ CREATE FUNCTION custanon.machineid() RETURNS SETOF text
 BEGIN
   -- this machineid function is used to read the MACHINE IDENTIFIER
   -- of the Linux OS on which PostgreSQL is running.
-  -- 
+  --
   CREATE TEMP TABLE IF NOT EXISTS tmp_machineid (content text) ON COMMIT DROP;
   EXECUTE 'COPY tmp_machineid FROM ''/etc/machine-id''';
   RETURN QUERY SELECT content FROM tmp_machineid LIMIT 1;
@@ -2347,7 +3248,7 @@ BEGIN
   -- The parallel_anon function is the one making the anonymization.
   -- It's launched in a dedicated job using pg_cron extension, so pg_cron can manage
   -- several jobs in parallel.
-  -- This function will just take the next available SQL table to be anonymized 
+  -- This function will just take the next available SQL table to be anonymized
   -- that is not locked in the list and will lock its entry in the list.
   -- This is the way other calls launched in parallel of this function will each select
   -- a different SQL table to anonymize and thus will run concurrently. Doing that, we
@@ -2375,7 +3276,7 @@ BEGIN
   global_anonstart := clock_timestamp();
   PERFORM custanon.logging(jobparams.dbid, pid || global_anonstart || ': Anonymizing all tables:');
   LOOP
-    -- Select the next available table to be anonymized. Exit loop if no more table to anonymize.
+    -- select the next available table part to be anonymized. Exit loop if no more table to anonymize.
     --
     -- SELECT INTO r1 t0.tbl, t0.pk, t0.anon_pk, t0.pk_colname, t1.id, t1.nb, t1.shiftto, t1.nbtuples, t1.content FROM custanon.counts t0, custanon.splitter_read t1 WHERE t0.enabled=true AND t0.error=false AND t0.tobeprocessed=true AND t0.dbid=jobparams.dbid AND t0.dbid=t1.dbid AND t0.tbl=t1.tbl AND t1.pid IS NULL ORDER BY t0.complexity DESC, t1.shiftto LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED;
     SELECT INTO r1 t0.tbl, t0.pk, t0.anon_pk OR t0.anon_ui AS anon_pk, t0.pk_colname, t1.id, t1.nb, t1.shiftto, t1.nbtuples, t1.shiftto + t1.nbtuples AS shiftend, t1.content FROM custanon.counts t0, custanon.splitter_read t1 WHERE t0.enabled=true AND t0.error=false AND t0.tobeprocessed=true AND t0.dbid=jobparams.dbid AND t0.dbid=t1.dbid AND t0.tbl=t1.tbl AND t1.pid IS NULL ORDER BY t0.complexity, t1.shiftto LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED;
@@ -2526,7 +3427,7 @@ ALTER PROCEDURE custanon.parallel_anon() OWNER TO ninjanon;
 
 CREATE PROCEDURE custanon.parallel_inject()
     LANGUAGE plpgsql
-    AS $_$
+    AS $$
 DECLARE
   deletecsv boolean := (custanon.getconfig('deletecsv', 'false')::boolean);
   err boolean;
@@ -2555,7 +3456,7 @@ DECLARE
   r2 RECORD;
   r3 RECORD;
 BEGIN
-  -- the parallel_inject method is used to parallelized the writing of the 
+  -- The parallel_inject method is used to parallelized the writing of the
   -- anonymized data back in the source database. So it's used only with
   -- the "csvsplitinject" mode.
   -- This function is also called by jobs configured in pg_cron extension.
@@ -2572,7 +3473,7 @@ BEGIN
   END IF;
 
   -- Inject all files available
-  -- 
+  --
   global_anonstart := clock_timestamp();
   LOOP
     -- Select the next available table to be injected. Exit loop if no more table to inject.
@@ -2592,9 +3493,9 @@ BEGIN
     --
     injectstart := clock_timestamp();
     BEGIN
-      EXECUTE 'SET ROLE ' || schemaowner;
+      EXECUTE 'SET ROLE ' || r1.schemaowner;
 --      EXECUTE 'SET LOCAL datestyle TO ' || jobparams.datestyle;
-      EXECUTE 'COPY ' || srcschema || '.' || r1.tbl || ' FROM ''' || r1.filepart || ''' WITH (FORMAT csv, DELIMITER '';'')';
+      EXECUTE 'COPY ' || r1.srcschema || '.' || r1.tbl || ' FROM ''' || r1.filepart || ''' WITH (FORMAT csv, DELIMITER '';'')';
 --      RESET datestyle;
       RESET ROLE;
     EXCEPTION WHEN OTHERS THEN
@@ -2609,11 +3510,11 @@ BEGIN
     PERFORM custanon.logging(r1.dbid, pid || '    Re-injection of ' || r1.filepart || ' in ' || r1.tbl || ' done in ' || injectduration);
     COMMIT;
 
-    -- If the table has been completely rebuilt (which means if all CSV data files
+    -- If the table has been completely rebuilt (which means if all CSV data files,
     -- for the table have been injected), re-enable indexes, triggers, FKs and set
     -- LOGGING. For now we can do it for Oracle only because the Oracle FDW provides
     -- a function allowing us to execute DDL statements, which is not the case of
-    -- the other FDWs for the other DB engines. We're currently investigating and 
+    -- the other FDWs for the other DB engines. We're currently investigating and
     -- working on a way to do the same for the other DB engines.
     --
     SELECT INTO r2 nb=count(*) AS fully_injected, min(startedat) AS startedat, max(endedat) AS endedat, max(endedat)-min(startedat) AS duration FROM custanon.splitter WHERE tbl=r1.tbl AND endedat IS NOT NULL GROUP BY tbl, nb;
@@ -2635,7 +3536,7 @@ BEGIN
           -- rebuild indexes of the table in parallel
           --
           PERFORM custanon.logging(r1.dbid, pid || '    Rebuild indexes and re-enable constraints, triggers, logging on ' || r1.tbl || '...');
-          EXECUTE 'SET ROLE ' || schemaowner;
+          EXECUTE 'SET ROLE ' || r1.schemaowner;
           COMMIT;
           BEGIN
             FOR r3 IN EXECUTE format('SELECT t0.index_name FROM %s.user_indexes t0 WHERE t0.table_name=''%s'' AND t0.index_type=''NORMAL'' AND t0.status=''UNUSABLE''', r1.srcschema, r1.tbl)
@@ -2682,13 +3583,13 @@ BEGIN
         -- Here again we can do it only for Oracle thanks to the Oracle FDW capabilities.
         --
         PERFORM 1 FROM custanon.splitter_read WHERE endedat IS NULL AND dbid=r1.dbid;
-        IF NOT FOUND THEN
-          PERFORM 1 FROM custanon.splitter WHERE dbid=r1.dbid;
-          IF NOT FOUND THEN
+	IF NOT FOUND THEN
+	  PERFORM 1 FROM custanon.splitter WHERE dbid=r1.dbid;
+	  IF NOT FOUND THEN
             PERFORM custanon.logging(r1.dbid, pid || '    Re-enable constraints on all tables...');
             COMMIT;
             IF r1.dbtech='oracle' THEN
-              EXECUTE 'SET ROLE ' || schemaowner;
+              EXECUTE 'SET ROLE ' || r1.schemaowner;
               FOR r3 IN EXECUTE format('SELECT t0.table_name, t0.constraint_name FROM %s.user_constraints t0 WHERE t0.status=''DISABLED'' AND (t0.constraint_type=''R'' OR t0.constraint_type=''C'')', r1.srcschema)
               LOOP
                 PERFORM custanon.logging(r1.dbid, pid || '      Re-enable constraint ' || r3.constraint_name || ' on table ' || r1.f_srcschema || '.' || r3.table_name || '...');
@@ -2715,7 +3616,7 @@ BEGIN
 --  UPDATE custanon.parallel SET state='done', endedat=global_anonend WHERE id=jobparams.id;
   COMMIT;
 END;
-$_$;
+$$;
 
 
 ALTER PROCEDURE custanon.parallel_inject() OWNER TO ninjanon;
@@ -2838,6 +3739,50 @@ ALTER FUNCTION custanon.pseudo_avs(seed anyelement, salt text) OWNER TO ninjanon
 --
 
 SECURITY LABEL FOR anon ON FUNCTION custanon.pseudo_avs(seed anyelement, salt text) IS 'TRUSTED';
+
+
+--
+-- Name: pseudo_avs_wc(anyelement, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.pseudo_avs_wc(seed anyelement, salt text DEFAULT NULL::text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER PARALLEL SAFE
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  lv_sum TEXT;
+  lv_val TEXT;
+  zerow RECORD;
+  oid_rec RECORD;
+BEGIN
+  lv_sum := md5(seed::text);
+  SELECT INTO zerow t1.val FROM custanon.cache_avs t0, custanon.avs t1 WHERE t0.oid=t1.oid AND t0.sum=lv_sum;
+  IF FOUND THEN
+    RETURN zerow.val;
+  END IF;
+
+  INSERT INTO custanon.cache_avs (sum, oid)
+    SELECT lv_sum, oid FROM custanon.avs
+    WHERE oid = anon.projection_to_oid(
+      seed,
+      COALESCE(salt, pg_catalog.current_setting('anon.salt')),
+      (SELECT last_value FROM custanon.avs_oid_seq)
+    )
+    RETURNING oid INTO oid_rec;
+
+  lv_val := (SELECT val FROM custanon.avs WHERE oid=oid_rec.oid);
+  RETURN lv_val;
+END;
+$$;
+
+
+ALTER FUNCTION custanon.pseudo_avs_wc(seed anyelement, salt text) OWNER TO ninjanon;
+
+--
+-- Name: FUNCTION pseudo_avs_wc(seed anyelement, salt text); Type: SECURITY LABEL; Schema: custanon; Owner: ninjanon
+--
+
+SECURITY LABEL FOR anon ON FUNCTION custanon.pseudo_avs_wc(seed anyelement, salt text) IS 'TRUSTED';
 
 
 --
@@ -3270,6 +4215,113 @@ SECURITY LABEL FOR anon ON FUNCTION custanon.pseudo_first_name(seed anyelement, 
 
 
 --
+-- Name: pseudo_iban(character varying, text, text, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.pseudo_iban(v_country character varying, seed text DEFAULT NULL::text, salt text DEFAULT 'this_is_the_default_one'::text, human boolean DEFAULT false) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER PARALLEL SAFE
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $_$
+DECLARE
+  lv_bban_chars TEXT := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  lv_bban_len INTEGER := length(lv_bban_chars);
+  lv_bban TEXT := '';
+  mod97 TEXT := '';
+  partialiban TEXT;
+  fingerprint NUMERIC(38,0);
+  tmpnum NUMERIC(38,0);
+  ctrlkey INTEGER;
+  asciicode INTEGER;
+  i INTEGER;
+  c CHAR;
+  r1 RECORD;
+BEGIN
+  -- The custanon.pseudo_iban function is used as an IBAN pseudonymization function
+  -- that doesn't need to use an IBAN dictionnary to create always the same
+  -- consistant IBAN according the input data. This generator makes use of basic
+  -- rules for plenty of countries in the world, for example in term of legnth
+  -- of IBAN generated. Generated IBANs have the correct ISO13616 control key.
+  -- Please note that if you want IBANs having only numbers instead of numbers+
+  -- letters, you have to update the content of the lv_bban_chars variable accordingly.
+  -- Made using the help of ChatGPT.
+  --
+  SELECT INTO r1 iso3166, ibanl, bbanl FROM custanon.countries WHERE iso3166=upper(v_country);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Country code is not valid';
+  END IF;
+
+  IF seed IS NOT NULL THEN
+    -- generate a BBAN based on the provided seed input
+    --
+    fingerprint := abs(('x' || lpad(md5(seed || salt), 16, '0'))::bit(64)::bigint)::numeric;
+
+    FOR i IN 1..r1.bbanl
+    LOOP
+      lv_bban := lv_bban || substr(lv_bban_chars, (mod(fingerprint, lv_bban_len)+1)::integer, 1);
+      fingerprint := floor(fingerprint/lv_bban_len);
+      IF fingerprint=0 THEN
+	fingerprint := abs(('x' || lpad(md5(lv_bban || seed || salt), 16, '0'))::bit(64)::bigint)::numeric;
+      END IF;
+    END LOOP;
+  ELSE
+    -- generate a completely random BBAN
+    --
+    FOR i IN 1..r1.bbanl
+    LOOP
+      lv_bban := lv_bban || substr(lv_bban_chars, floor(random()*lv_bban_len+1)::integer, 1);
+    END LOOP;
+  END IF;
+
+  -- Convert everything in numbers
+  --
+  FOR i IN 1..r1.bbanl
+  LOOP
+    c := substr(lv_bban, i, 1);
+    asciicode := ascii(c);
+    IF asciicode >= 65 AND asciicode <= 90 THEN
+      mod97 := mod97 || (asciicode-55)::TEXT;
+    ELSE
+      mod97 := mod97 || c;
+    END IF;
+  END LOOP;
+
+  -- Convert country code and add '00' at the end
+  --
+  FOR i IN 1..2 LOOP
+      mod97 := mod97 || (ascii(substr(r1.iso3166, i, 1))-55)::TEXT;
+  END LOOP;
+  mod97 := mod97 || '00';
+
+  -- ISO 13616 control key
+  --
+  tmpnum := 0;
+  FOR i IN 1..length(mod97) BY 6
+  LOOP
+    tmpnum := (tmpnum::TEXT || substr(mod97, i, 6))::NUMERIC(38,0) % 97;
+  END LOOP;
+  ctrlkey := 98-tmpnum;
+  partialiban := r1.iso3166 || lpad(ctrlkey::TEXT, 2, '0') || lv_bban;
+
+  -- format output for humans if needed
+  --
+  IF human THEN
+      RETURN regexp_replace(partialiban, '(.{4})(?!$)', '\1 ', 'g');
+  END IF;
+  RETURN partialiban;
+END;
+$_$;
+
+
+ALTER FUNCTION custanon.pseudo_iban(v_country character varying, seed text, salt text, human boolean) OWNER TO ninjanon;
+
+--
+-- Name: FUNCTION pseudo_iban(v_country character varying, seed text, salt text, human boolean); Type: SECURITY LABEL; Schema: custanon; Owner: ninjanon
+--
+
+SECURITY LABEL FOR anon ON FUNCTION custanon.pseudo_iban(v_country character varying, seed text, salt text, human boolean) IS 'TRUSTED';
+
+
+--
 -- Name: pseudo_last_name(anyelement, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
@@ -3325,6 +4377,43 @@ ALTER FUNCTION custanon.pseudo_last_name_u(seed anyelement, salt text) OWNER TO 
 
 SECURITY LABEL FOR anon ON FUNCTION custanon.pseudo_last_name_u(seed anyelement, salt text) IS 'TRUSTED';
 
+
+--
+-- Name: pseudo_last_name_wc(anyelement, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.pseudo_last_name_wc(seed anyelement, salt text DEFAULT NULL::text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER PARALLEL SAFE
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+  lv_sum TEXT;
+  lv_val TEXT;
+  zerow RECORD;
+  oid_rec RECORD;
+BEGIN
+  lv_sum := md5(seed::text);
+  SELECT INTO zerow t1.val FROM custanon.cache_last_name t0, custanon.last_name t1 WHERE t0.oid=t1.oid AND t0.sum=lv_sum;
+  IF FOUND THEN
+    RETURN zerow.val;
+  END IF;
+
+  INSERT INTO custanon.cache_last_name (sum, oid)
+    SELECT lv_sum, oid FROM custanon.last_name
+    WHERE oid = anon.projection_to_oid(
+      seed,
+      COALESCE(salt, pg_catalog.current_setting('anon.salt')),
+      (SELECT last_value FROM custanon.last_name_oid_seq)
+    )
+    RETURNING oid INTO oid_rec;
+
+  lv_val := (SELECT val FROM custanon.last_name WHERE oid=oid_rec.oid);
+  RETURN lv_val;
+END;
+$$;
+
+
+ALTER FUNCTION custanon.pseudo_last_name_wc(seed anyelement, salt text) OWNER TO ninjanon;
 
 --
 -- Name: pseudo_street(anyelement, text); Type: FUNCTION; Schema: custanon; Owner: ninjanon
@@ -3534,6 +4623,28 @@ $$;
 ALTER FUNCTION custanon.splitter_read(v_dstdbtech text, v_projectname text, v_dbid bigint) OWNER TO ninjanon;
 
 --
+-- Name: start_anon(bigint); Type: FUNCTION; Schema: custanon; Owner: ninjanon
+--
+
+CREATE FUNCTION custanon.start_anon(v_dbid bigint) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'pg_temp'
+    AS $$
+DECLARE
+BEGIN
+  -- The start_anon function is used to inform the parallel anonymization jobs
+  -- that's everything is ready. Those jobs wil start their work only when they
+  -- see this specific status, which will have for effect to really anonymize
+  -- the source database.
+  --
+  UPDATE custanon.parallel SET state='ready', startedat=NULL, endedat=NULL WHERE (state='wait' OR state='done') AND dbid=v_dbid;
+END;
+$$;
+
+
+ALTER FUNCTION custanon.start_anon(v_dbid bigint) OWNER TO ninjanon;
+
+--
 -- Name: start_anon(bigint, boolean); Type: FUNCTION; Schema: custanon; Owner: ninjanon
 --
 
@@ -3681,6 +4792,30 @@ CREATE TABLE custanon.base_noms (
 ALTER TABLE custanon.base_noms OWNER TO ninjanon;
 
 --
+-- Name: cache_avs; Type: TABLE; Schema: custanon; Owner: ninjanon
+--
+
+CREATE UNLOGGED TABLE custanon.cache_avs (
+    sum character varying(32) NOT NULL,
+    oid integer NOT NULL
+);
+
+
+ALTER TABLE custanon.cache_avs OWNER TO ninjanon;
+
+--
+-- Name: cache_last_name; Type: TABLE; Schema: custanon; Owner: ninjanon
+--
+
+CREATE UNLOGGED TABLE custanon.cache_last_name (
+    sum character varying(32) NOT NULL,
+    oid integer NOT NULL
+);
+
+
+ALTER TABLE custanon.cache_last_name OWNER TO ninjanon;
+
+--
 -- Name: cities; Type: TABLE; Schema: custanon; Owner: ninjanon
 --
 
@@ -3696,7 +4831,7 @@ CREATE TABLE custanon.cities (
 ALTER TABLE custanon.cities OWNER TO ninjanon;
 
 --
--- Name: cities_fra; Type: TABLE; Schema: custanon; Owner: -
+-- Name: cities_fra; Type: TABLE; Schema: custanon; Owner: ninjanon
 --
 
 CREATE TABLE custanon.cities_fra (
@@ -3707,8 +4842,10 @@ CREATE TABLE custanon.cities_fra (
 );
 
 
+ALTER TABLE custanon.cities_fra OWNER TO ninjanon;
+
 --
--- Name: cities_fra_oid_seq; Type: SEQUENCE; Schema: custanon; Owner: -
+-- Name: cities_fra_oid_seq; Type: SEQUENCE; Schema: custanon; Owner: ninjanon
 --
 
 CREATE SEQUENCE custanon.cities_fra_oid_seq
@@ -3791,7 +4928,10 @@ CREATE TABLE custanon.countries (
     iso3 character varying(5),
     country text,
     pays text,
-    native text
+    native text,
+    iso3166 character varying(2),
+    ibanl integer,
+    bbanl integer
 );
 
 
@@ -3813,7 +4953,7 @@ CREATE SEQUENCE custanon.countries_oid_seq
 ALTER SEQUENCE custanon.countries_oid_seq OWNER TO ninjanon;
 
 --
--- Name: countries_oid_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: -
+-- Name: countries_oid_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: ninjanon
 --
 
 ALTER SEQUENCE custanon.countries_oid_seq OWNED BY custanon.countries.oid;
@@ -4343,7 +5483,7 @@ CREATE SEQUENCE custanon.splitter_read_id_seq
 ALTER SEQUENCE custanon.splitter_read_id_seq OWNER TO ninjanon;
 
 --
--- Name: splitter_read_id_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: -
+-- Name: splitter_read_id_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: ninjanon
 --
 
 ALTER SEQUENCE custanon.splitter_read_id_seq OWNED BY custanon.splitter_read.id;
@@ -4391,7 +5531,7 @@ CREATE SEQUENCE custanon.streets_fra_oid_seq
     AS integer
     START WITH 1
     INCREMENT BY 1
-    MINVALUE 0
+    NO MINVALUE
     NO MAXVALUE
     CACHE 1;
 
@@ -4399,10 +5539,11 @@ CREATE SEQUENCE custanon.streets_fra_oid_seq
 ALTER SEQUENCE custanon.streets_fra_oid_seq OWNER TO ninjanon;
 
 --
--- Name: streets_fra_oid_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: -
+-- Name: streets_fra_oid_seq; Type: SEQUENCE OWNED BY; Schema: custanon; Owner: ninjanon
 --
 
 ALTER SEQUENCE custanon.streets_fra_oid_seq OWNED BY custanon.streets_fra.oid;
+
 
 --
 -- Name: streets_oid_seq; Type: SEQUENCE; Schema: custanon; Owner: ninjanon
@@ -4539,7 +5680,7 @@ ALTER TABLE ONLY custanon.streets ALTER COLUMN oid SET DEFAULT nextval('custanon
 
 
 --
--- Name: streets_fra oid; Type: DEFAULT; Schema: custanon; Owner: -
+-- Name: streets_fra oid; Type: DEFAULT; Schema: custanon; Owner: ninjanon
 --
 
 ALTER TABLE ONLY custanon.streets_fra ALTER COLUMN oid SET DEFAULT nextval('custanon.streets_fra_oid_seq'::regclass);
@@ -4567,6 +5708,22 @@ ALTER TABLE ONLY custanon.avs
 
 ALTER TABLE ONLY custanon.base_noms
     ADD CONSTRAINT base_noms_pkey PRIMARY KEY (langue, nom);
+
+
+--
+-- Name: cache_avs cache_avs_pkey; Type: CONSTRAINT; Schema: custanon; Owner: ninjanon
+--
+
+ALTER TABLE ONLY custanon.cache_avs
+    ADD CONSTRAINT cache_avs_pkey PRIMARY KEY (sum);
+
+
+--
+-- Name: cache_last_name cache_last_name_pkey; Type: CONSTRAINT; Schema: custanon; Owner: ninjanon
+--
+
+ALTER TABLE ONLY custanon.cache_last_name
+    ADD CONSTRAINT cache_last_name_pkey PRIMARY KEY (sum);
 
 
 --
@@ -4602,7 +5759,7 @@ ALTER TABLE ONLY custanon.config
 
 
 --
--- Name: countries countries_pkey; Type: CONSTRAINT; Schema: custanon; Owner: -
+-- Name: countries countries_pkey; Type: CONSTRAINT; Schema: custanon; Owner: ninjanon
 --
 
 ALTER TABLE ONLY custanon.countries
@@ -4793,13 +5950,6 @@ CREATE UNIQUE INDEX first_name_m_langue_val_idx ON custanon.first_name_m USING b
 
 
 --
--- Name: last_name_val_idx; Type: INDEX; Schema: custanon; Owner: ninjanon
---
-
-CREATE UNIQUE INDEX last_name_val_idx ON custanon.last_name USING btree (val) WHERE (common = true);
-
-
---
 -- Name: splitter_dbid_tbl_idx; Type: INDEX; Schema: custanon; Owner: ninjanon
 --
 
@@ -4874,13 +6024,6 @@ GRANT SELECT ON TABLE custanon.cities TO PUBLIC;
 
 
 --
--- Name: TABLE cities_fra; Type: ACL; Schema: custanon; Owner: ninjanon
---
-
-GRANT SELECT ON TABLE custanon.cities_fra TO PUBLIC;
-
-
---
 -- Name: TABLE datafinders; Type: ACL; Schema: custanon; Owner: ninjanon
 --
 
@@ -4902,20 +6045,6 @@ GRANT SELECT ON TABLE custanon.first_name TO PUBLIC;
 
 
 --
--- Name: TABLE first_name_f; Type: ACL; Schema: custanon; Owner: ninjanon
---
-
-GRANT SELECT ON TABLE custanon.first_name_f TO PUBLIC;
-
-
---
--- Name: TABLE first_name_m; Type: ACL; Schema: custanon; Owner: ninjanon
---
-
-GRANT SELECT ON TABLE custanon.first_name_m TO PUBLIC;
-
-
---
 -- Name: TABLE last_name; Type: ACL; Schema: custanon; Owner: ninjanon
 --
 
@@ -4930,15 +6059,8 @@ GRANT SELECT ON TABLE custanon.streets TO PUBLIC;
 
 
 --
--- Name: TABLE streets_fra; Type: ACL; Schema: custanon; Owner: ninjanon
---
-
-GRANT SELECT ON TABLE custanon.streets_fra TO PUBLIC;
-
-
---
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XqBKqUbEqYZnS35YKN0nC8ErVL0at6m33cWbVrUC3NHorfdsEmsyr62HDDJ0sNa
+\unrestrict odsC6Rjc1O5fUSCtHtvrpbtaVNNlecmIbasCLyn5LBAnTOvGmF7ZYhjWp4krw3P
 
